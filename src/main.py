@@ -23,7 +23,7 @@ from .framework.agent import SoccerAgentMixin
 from .framework.types import KICKING_TEAM_NONE, Context, GameState, SetPlay
 from .param import *
 from .player import Player
-from .utils import dist, opponent_goal, own_goal
+from .utils import angle_to, clamp, dist, opponent_goal, own_goal
 
 
 _log = logging.getLogger(__name__)
@@ -118,6 +118,7 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         store.cur_phase = None
         store.kickoff_taker = None    # 锁定的开球主罚球员 id(每次进入开球时重选)
         store.normal_attacker = None
+        store.set_play_taker = None   # 锁定的定位球主罚球员 id
 
     @staticmethod
     def play(context: Context, players: list[Player], store) -> None:
@@ -175,12 +176,14 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
             _act_opp_set_play(context, active, store)
         elif phase == Phase.READY:
             _clear_normal_sticky(store)
-            _act_ready(context, active)
+            _act_ready(context, active, store)
         elif phase == Phase.STOPPED:
             _clear_normal_sticky(store)
-            for p in active:
-                p.action = "stopped"
-                p.stop()
+            _act_stopped(context, active, store)
+
+        # 离开 READY 就丢弃槽位锁定,下次 READY 重新分配。
+        if phase != Phase.READY:
+            store.ready_assignment = None
 
         # 队员可视化统一在最后画一遍:覆盖所有球员(含判罚/未就绪/STOPPED),
         # 修复 SET 等状态下红球/标签消失的问题。
@@ -225,12 +228,98 @@ def _select_closest_attacker(
     return best
 
 
+def _field_point(
+    context: Context, x: float, y: float, margin: float = 0.3,
+) -> tuple[float, float]:
+    """把目标点夹到场地内(留 margin 余量),避免机器人被赶出场。"""
+    half_x = context.field.length / 2.0 - margin
+    half_y = context.field.width / 2.0 - margin
+    return clamp(x, -half_x, half_x), clamp(y, -half_y, half_y)
+
+
+def _keep_clear_of_ball(context: Context, ball, target: tuple[float, float]) -> tuple[float, float]:
+    """把目标点推到距球至少 SET_PLAY_DEF_GAP_M 的位置,再夹进场内。
+
+    对方定位球期间,防守方机器人距球过近会在主罚触球瞬间被 R-07(1.45m)罚下,
+    所以所有等待/站位目标都要留足余量。
+    """
+    bx, by = ball.x, ball.y
+    tx, ty = target
+    d = math.hypot(tx - bx, ty - by)
+    if d < SET_PLAY_DEF_GAP_M:
+        if d < 1e-6:
+            ux, uy = -1.0, 0.0
+        else:
+            ux, uy = (tx - bx) / d, (ty - by) / d
+        tx, ty = bx + ux * SET_PLAY_DEF_GAP_M, by + uy * SET_PLAY_DEF_GAP_M
+    return _field_point(context, tx, ty, 0.3)
+
+
+def _away_from_ball_point(
+    context: Context, ball, pose, distance: float,
+) -> tuple[float, float]:
+    """从球指向 pose 的方向再外移 distance:已经太近时尽快撤离用。"""
+    bx, by = ball.x, ball.y
+    dx, dy = pose.x - bx, pose.y - by
+    d = math.hypot(dx, dy)
+    if d < 1e-6:
+        ux, uy = -1.0, 0.0
+    else:
+        ux, uy = dx / d, dy / d
+    return _field_point(context, bx + ux * distance, by + uy * distance, 0.3)
+
+
+def _defender_set_play_spot(context: Context, ball, lateral: float) -> tuple[float, float]:
+    """防守等待点:沿"球→己方门"方向后退 SET_PLAY_DEF_SAFE_DIST_M,并横向错开。"""
+    gx, gy = own_goal(context)
+    bx, by = ball.x, ball.y
+    dx, dy = gx - bx, gy - by
+    d = math.hypot(dx, dy)
+    if d < 1e-6:
+        ux, uy = -1.0, 0.0
+    else:
+        ux, uy = dx / d, dy / d
+    px, py = -uy, ux    # 垂直于"球→门"方向
+    tx = bx + ux * SET_PLAY_DEF_SAFE_DIST_M + px * lateral
+    ty = by + uy * SET_PLAY_DEF_SAFE_DIST_M + py * lateral
+    return _keep_clear_of_ball(context, ball, (tx, ty))
+
+
+def _set_play_kick_plan(context: Context, set_play: SetPlay, ball) -> tuple[float, float]:
+    """我方定位球:返回(场地系踢球方向, 力度)。
+
+    - 角球:几何上无法直接射入,朝门前抢点位置传中;
+    - 直接任意球/点球:直接打门;
+    - 界外球/球门球/间接任意球:向前场踢。第一脚禁止朝己方门,否则乌龙无效。
+    """
+    gx, gy = opponent_goal(context)
+    half_length = context.field.length / 2.0
+    if set_play in (SetPlay.CORNER_KICK, SetPlay.DIRECT_FREE_KICK, SetPlay.PENALTY_KICK):
+        if set_play == SetPlay.CORNER_KICK:
+            target = (half_length - 1.0, clamp(ball.y * 0.2, -1.0, 1.0))
+            power = KICK_POWER_SET_PLAY_FORWARD
+        else:
+            target = (gx, gy)
+            power = KICK_POWER_SET_PLAY_SHOT
+    else:
+        target = (half_length, clamp(ball.y * 0.3, -1.5, 1.5))
+        power = KICK_POWER_SET_PLAY_FORWARD
+    return angle_to(ball.x, ball.y, target[0], target[1]), power
+
+
 def _act_normal(context: Context, players: list[Player], store) -> None:
     """NORMAL:距球最近者 attack,剩下人里离己方门最近者 guard,其余 support。
 
     ``players`` 是本帧可行动球员(已就绪、pose 已知),这里直接挑角色并执行。
     """
     if not players:
+        return
+
+    # 球不可见(约 1.5s 没更新):不要乱走,原地停住等待球重新出现。
+    if context.ball is None:
+        for p in players:
+            p.action = "no_ball"
+            p.stop()
         return
 
     attacker = _select_closest_attacker(
@@ -255,7 +344,11 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
 
 
 def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
-    """OUR_KICKOFF:锁定距离最小者开球,剩下人里离己方门最近者 guard,其余 support。"""
+    """OUR_KICKOFF:锁定距离最小者开球,剩下人里离己方门最近者 guard,其余原地等待。
+
+    开球不触发自由球避让(is_free_kick 不含 kickOff),非主罚方只需"本方半场 + 圈外";
+    我方非主罚球员此时不动最稳。
+    """
     if not players:
         return
 
@@ -270,7 +363,8 @@ def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
         return
 
     attacker.action = "kickoff"
-    attacker.kick(0.1, KICK_POWER_OUR_KICKOFF)
+    # 朝 +x(对方半场)踢;开球后主罚触球即 ball_free,不必等 10s。
+    attacker.kick(0.0, KICK_POWER_OUR_KICKOFF)
 
     rest = [p for p in players if p is not attacker]
     if rest:
@@ -279,110 +373,308 @@ def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
         guard.guard()
         rest = [p for p in rest if p is not guard]
 
-    for p in rest:
-        p.action = "stay"
-        p.stop()
+    # 非主罚球员必须在本方半场且中圈外。旧版直接 stop() 原地不动,若球权转换前
+    # 人还在对方半场/中线附近,开球瞬间就吃 kickoff_kicking_side_outside_center
+    # (iteration-10 实测 robot1 robotX=0.06、robot2 robotX=1.57,各 30s)。
+    for idx, p in enumerate(rest):
+        target = _field_point(
+            context, -1.0, 2.4 if idx % 2 == 0 else -2.4, 0.3,
+        )
+        needs_reposition = p.pose is not None and (
+            p.pose.x > -0.3
+            or dist(p.pose.x, p.pose.y, 0.0, 0.0)
+            < context.field.circle_radius + 0.2
+        )
+        if needs_reposition:
+            p.action = "kickoff:reposition"
+            p.walk_to(
+                target, face=0.0, avoid_ball=False, avoid_robots=True,
+            )
+        else:
+            p.action = "stay"
+            p.stop()
 
 
 def _act_opp_kickoff(context: Context, players: list[Player]) -> None:
-    """对方开球:一人守门,其余人站到中圈外固定点等待。"""
+    """对方开球:门将守门,其余人站本方半场、中圈外、距球 >3m 的等待点。
+
+    规则:开球不触发自由球避让(is_free_kick 不含 kickOff),但非开球方
+    (a) 必须在本方半场 (b) 不得进中圈(离中心 >1.55m)。等待点再留离球 >3m,
+    避开 M-05(球 3m 内 10s 不动罚下)。
+    """
     if not players:
         return
     gx, gy = own_goal(context)
-    guard = min(players, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
-    guard.guard()
+    keeper = min(players, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
+    keeper.action = "opp_kickoff:keeper"
+    keeper.guard()
+    rest = [p for p in players if p is not keeper]
 
-    rest = [p for p in players if p is not guard]
-    r = context.field.circle_radius
-    slots = [(-r - 0.5, 0.0), (-r - 2.0, 0.5)]
-    for p, target in zip(rest, slots):
-        p.action = "opp_kickoff:ready"
-        p.walk_to(target, avoid_ball=True, avoid_robots=True)
+    ball = context.ball
+    bx, by = (ball.x, ball.y) if ball is not None else (0.0, 0.0)
+    dx, dy = gx - bx, gy - by
+    d = math.hypot(dx, dy)
+    ux, uy = (dx / d, dy / d) if d > 1e-6 else (-1.0, 0.0)
+    px, py = -uy, ux
+
+    for i, p in enumerate(rest):
+        lateral = 1.4 if i % 2 == 0 else -1.4
+        tx = bx + ux * OPP_KICKOFF_WAIT_RADIUS_M + px * lateral
+        ty = by + uy * OPP_KICKOFF_WAIT_RADIUS_M + py * lateral
+        # 非开球方必须在本方半场(x<=0),同时留一点余量。
+        tx = min(tx, -0.15)
+        tx, ty = _field_point(context, tx, ty, 0.3)
+        # 兜底:万一半场约束把点拉近中心圈,再沿径向推到圈外。
+        cx, cy = tx - bx, ty - by
+        cd = math.hypot(cx, cy)
+        if cd < 1.75:
+            if cd < 1e-6:
+                tx, ty = min(bx, 0.0) - 1.75, by
+            else:
+                tx, ty = bx + cx / cd * 1.75, by + cy / cd * 1.75
+            tx = min(tx, -0.15)
+            tx, ty = _field_point(context, tx, ty, 0.3)
+        p.action = "opp_kickoff:wait"
+        p.walk_to((tx, ty), face=0.0, avoid_ball=False, avoid_robots=True)
 
 
 def _act_our_set_play(context: Context, players: list[Player], store) -> None:
-    """OUR_SET_PLAY:按定位球类型分派, TODO：加入自己的逻辑。默认为 _act_normal"""
+    """OUR_SET_PLAY:我方定位球。摆球(stopped)时全员静止,球放开后主罚按类型踢球。
+
+    规则要点:
+    - 摆球阶段全员必须静止,不许碰球;
+    - 界外球/球门球/间接任意球:进球前需要 2 次触球(或球离开开球点 0.5m),
+      所以第一脚向前踢、由队友或自身第二次触球后再射门;
+    - 角球/直接任意球/点球:可以直接射门;
+    - 我方所有定位球第一脚都不许朝己方门(否则乌龙无效+对方角球)。
+    """
+    g = context.game
     set_play = get_set_play_type(context)
-    if set_play == SetPlay.THROW_IN:
-        _act_normal(context, players, store)
+
+    if g is not None and g.stopped:
+        for p in players:
+            p.action = "setplay:placement"
+            p.stop()
         return
-    if set_play == SetPlay.CORNER_KICK:
-        _act_normal(context, players, store)
+
+    if not players:
         return
-    if set_play == SetPlay.GOAL_KICK:
-        _act_normal(context, players, store)
+    ball = context.ball
+    if ball is None:
+        for p in players:
+            p.action = "setplay:no_ball"
+            p.stop()
         return
-    _act_normal(context, players, store)
+
+    # 主罚选择:最近者,阶段内粘滞避免抖动。
+    if store.prev_phase != Phase.OUR_SET_PLAY:
+        store.set_play_taker = None
+        store.ready_assignment = None
+    taker = _select_closest_attacker(context, players, getattr(store, "set_play_taker", None))
+    store.set_play_taker = taker.id
+    rest = [p for p in players if p is not taker]
+
+    kick_dir, power = _set_play_kick_plan(context, set_play, ball)
+    taker.action = f"setplay:{set_play.value}"
+    if dist(taker.pose.x, taker.pose.y, ball.x, ball.y) > SET_PLAY_NEAR_BALL_M:
+        # 先绕到球的"踢球侧"(贴边线时会被夹进场内,足够接近后下一帧直接踢)。
+        approach = _field_point(
+            context,
+            ball.x - math.cos(kick_dir) * 1.0,
+            ball.y - math.sin(kick_dir) * 1.0,
+            0.25,
+        )
+        taker.walk_to(approach, face=kick_dir, avoid_ball=True)
+    else:
+        taker.kick(kick_dir, power)
+
+    # 剩下人:离己方门最近者回守护门,其余人前插准备接应(不碰球)。
+    if rest:
+        gx, gy = own_goal(context)
+        keeper = min(rest, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
+        keeper.action = "setplay:guard"
+        keeper.guard()
+        rest = [p for p in rest if p is not keeper]
+
+    half_length = context.field.length / 2.0
+    half_width = context.field.width / 2.0
+    for i, p in enumerate(rest):
+        p.action = "setplay:receive"
+        tx = min(ball.x + SET_PLAY_RECEIVER_AHEAD_M, half_length - 0.6)
+        ty = clamp(ball.y + (1.2 if i % 2 == 0 else -1.2), -half_width + 0.6, half_width - 0.6)
+        p.move_to_position(_field_point(context, tx, ty, 0.35))
 
 
 def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
-    """对方开球： TODO: 实现自己的逻辑。默认与 Normal 相同"""
-    _act_normal(context, players, store)
+    """对方定位球:主罚触球(ball_free)之前,全员距球 >1.45m 且不碰球。
+
+    规则要点:
+    - 防守方在主罚触球前触球 → R-06 罚下 30s 并重踢;
+    - 主罚触球瞬间防守方距球 <1.45m → R-07 罚下 30s 并重踢;
+    - 球在 3m 内站 10s 不动 → M-05 罚下,所以等待点放在 3.3m 外;
+    - 绝对不能调用 attack/kick,也不能进中圈或对方半场之外的禁区风险区。
+    等官方状态 set_play 清空(ball_free)后,下一帧自动切回 NORMAL 再抢。
+    """
+    if not players:
+        return
+    ball = context.ball
+    if ball is None:
+        for p in players:
+            p.action = "opp_setplay:no_ball"
+            p.stop()
+        return
+
+    gx, gy = own_goal(context)
+    half_length = context.field.length / 2.0
+
+    # 门将:常规回小禁区;球太近时退到门线一侧并继续留出避让余量。
+    keeper = min(players, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
+    rest = [p for p in players if p is not keeper]
+    if dist(keeper.pose.x, keeper.pose.y, ball.x, ball.y) < SET_PLAY_DEF_GAP_M + 0.3:
+        ky = clamp(ball.y * 0.3, -KEEPER_GOAL_LINE_Y_LIMIT_M, KEEPER_GOAL_LINE_Y_LIMIT_M)
+        keeper_target = _keep_clear_of_ball(
+            context,
+            ball,
+            (-(half_length - KEEPER_GOAL_LINE_INSET_M), ky),
+        )
+        if dist(keeper.pose.x, keeper.pose.y, ball.x, ball.y) < RESTART_AVOID_RADIUS_M + 0.8:
+            keeper.action = "opp_setplay:keeper_escape"
+            keeper.omni_move_toward(keeper_target)
+        else:
+            keeper.action = "opp_setplay:keeper_fallback"
+            keeper.walk_to(
+                keeper_target,
+                face=angle_to(keeper.pose.x, keeper.pose.y, ball.x, ball.y),
+                avoid_ball=False,
+                avoid_robots=True,
+            )
+    else:
+        keeper.action = "opp_setplay:keeper"
+        keeper.guard()
+
+    laterals = (-1.2, 1.2)
+    for i, p in enumerate(rest):
+        d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
+        target = _defender_set_play_spot(context, ball, laterals[i % len(laterals)])
+        if d_ball < SET_PLAY_DEF_GAP_M:
+            # 仍在 1.45m 判定区附近:用全向平移(不转身)快速撤离。walk_to 在远距离
+            # 会先原地转身(MAX_ANGULAR=2rad/s,转 180° 约 1.6s),来不及躲开主罚触球。
+            p.action = "opp_setplay:escape"
+            p.omni_move_toward(target)
+        else:
+            p.action = "opp_setplay:wait"
+            p.move_to_position(target)
 
 
-def _act_ready(context: Context, players: list[Player]) -> None:
-    """READY:各自走 ready 位。"""
+def _act_stopped(context: Context, players: list[Player], store) -> None:
+    """STOPPED:SET/摆球等必须静止的阶段。
+
+    唯一例外是对方定位球的摆球阶段:裁判给了 1.5s 刹车宽限期(MUST_STOP_GRACE_MS),
+    宽限期内把仍离球太近的机器人全向撤离,避免主罚触球瞬间距球 <1.45m 吃 R-07
+    (iteration-02 因此吃了 3 张罚单)。宽限期一过立刻全员停止;我方定位球摆球时
+    不移动(主罚放开后会自己走近);SET(准备)阶段一律静止(motion_in_set)。
+    """
+    g = context.game
+    if g is None:
+        for p in players:
+            p.action = "stopped"
+            p.stop()
+        return
+
+    # 记录进入 STOPPED 的时刻(每段 stopped 只撤离一次)。
+    if store.prev_phase != Phase.STOPPED:
+        store.stopped_since = context.now
+
+    our_team = context.team_id
+    defending_restart = (
+        g.state == GameState.PLAYING
+        and g.stopped
+        and g.set_play != SetPlay.NONE
+        and g.kicking_team is not None
+        and int(g.kicking_team) != int(KICKING_TEAM_NONE)
+        and int(g.kicking_team) != int(our_team)
+    )
+    grace_left = STOP_GRACE_MOVE_S - (
+        context.now - getattr(store, "stopped_since", context.now)
+    )
+    can_vacate = defending_restart and grace_left > 0.0
+    ball = context.ball
+
+    for p in players:
+        if can_vacate and ball is not None and p.pose is not None:
+            d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
+            if d_ball < SET_PLAY_DEF_GAP_M:
+                lateral = -1.2 if p.id % 2 == 0 else 1.2
+                target = _defender_set_play_spot(context, ball, lateral)
+                p.action = "stopped:vacate"
+                p.omni_move_toward(target)
+                continue
+        p.action = "stopped"
+        p.stop()
+
+
+def _act_ready(context: Context, players: list[Player], store) -> None:
+    """READY:站到 ready 槽位,到位后立刻站住(进入 SET 需全员静止 5s)。
+
+    槽位分配**进入 READY 时锁定一次**存进 store.ready_assignment:
+    如果每帧都按"离槽最近"重新贪心,机器人在移动过程中会互相交换槽位、
+    来回走不停 → READY 永远凑不够 5s 静止 → 45s 超时强制进 SET,
+    随后在 SET 里位置非法吃罚(iteration-08 实测:robot1 离中心 1.55m、
+    robot3 在对方半场各吃 30s)。
+
+    站位合法性:非开球方必须在本方半场且离中心 >1.55m(留 0.3m 余量);
+    开球方可以在中圈内。
+    """
     game = context.game
     our_kickoff = game is not None and game.kicking_team == context.team_id
     field = context.field
-    # 我方开球：优先级站位：(-中圈半径, 0), (我方 goal area 中心点，0)， （0， 中圈半径）
     if our_kickoff:
-        if len(players) >= 1:
-            p1 = players[0]
-            p1.action = "ready"
-            p1.walk_to(
-                (-field.circle_radius, 0.0),
-                face=0.0,
-                avoid_ball=True,
-                avoid_robots=True,
-            )
-        if len(players) >= 2:
-            p2 = players[1]
-            p2.action = "ready"
-            p2.walk_to(
-                (-field.length / 2.0 + field.goal_area_length, 0.0),
-                face=0.0,
-                avoid_ball=True,
-                avoid_robots=True,
-            )
-        if len(players) >= 3:
-            p3 = players[2]
-            p3.action = "ready"
-            p3.walk_to(
-                (-0.5, field.circle_radius + 2),
-                face=0.0,
-                avoid_ball=True,
-                avoid_robots=True,
-            )
-    # 对方开球：优先级站位：(-中圈半径 - 0.5, 0), (我方 goal area 中心点，0)， （我方禁区线中心点， 0)
+        slots = [
+            (-field.circle_radius, 0.0),                                # 开球主罚预备位(开球方可在圈内)
+            (-field.length / 2.0 + field.goal_area_length, 0.0),        # 门将
+            (-0.5, field.circle_radius + 2.0),                          # 后场支援
+        ]
     else:
-        if len(players) >= 1:
-            p1 = players[0]
-            p1.action = "ready"
-            p1.walk_to(
-                (-field.circle_radius - 0.5, 0.0),
-                face=0.0,
-                avoid_ball=True,
-                avoid_robots=True,
-            )
-        if len(players) >= 2:
-            p2 = players[1]
-            p2.action = "ready"
-            p2.walk_to(
-                (-field.length / 2.0 + field.goal_area_length, 0.0),
-                face=0.0,
-                avoid_ball=True,
-                avoid_robots=True,
-            )
-        if len(players) >= 3:
-            p3 = players[2]
-            p3.action = "ready"
-            p3.walk_to(
-                (-field.length / 2.0 + field.penalty_area_length, 0.0),
-                face=0.0,
-                avoid_ball=True,
-                avoid_robots=True,
-            )
+        slots = [
+            (-field.circle_radius - 0.8, 0.0),                          # 离中心 2.3m(>1.55+余量)
+            (-field.length / 2.0 + field.goal_area_length, 0.0),
+            (-field.length / 2.0 + field.penalty_area_length, 0.0),
+        ]
+
+    assignment = getattr(store, "ready_assignment", None)
+    active_ids = {p.id for p in players}
+    if not isinstance(assignment, dict):
+        assignment = None
+    need_rebuild = assignment is None or (
+        context.game is not None
+        and getattr(store, "prev_phase", None) != Phase.READY
+    )
+    if need_rebuild:
+        assignment = {}
+        remaining = list(players)
+        for slot in slots:
+            if not remaining:
+                break
+            p = min(remaining, key=lambda q: dist(q.pose.x, q.pose.y, slot[0], slot[1]))
+            assignment[p.id] = slot
+            remaining.remove(p)
+        store.ready_assignment = assignment
+    else:
+        # 新上场/解罚的球员:补到空闲槽位(已分配的槽位不换人)。
+        used = {tuple(v) for k, v in assignment.items() if k in active_ids}
+        free = [s for s in slots if tuple(s) not in used]
+        for p in players:
+            if p.id not in assignment and free:
+                slot = min(free, key=lambda s: dist(p.pose.x, p.pose.y, s[0], s[1]))
+                assignment[p.id] = slot
+                free.remove(slot)
+
+    for p in players:
+        slot = assignment.get(p.id)
+        if slot is None:
+            continue
+        p.action = "ready"
+        p.walk_to(slot, face=0.0, avoid_ball=True, avoid_robots=True)
 
 
 

@@ -22,6 +22,11 @@ KICK_POWER_DEFAULT = 5.0
 KICK_POWER_BACKFIELD = 5.0
 KICK_POWER_OUR_KICKOFF = 5.0
 
+# 定位球:向前场踢出(界外球/球门球/间接任意球)的力度。
+KICK_POWER_SET_PLAY_FORWARD = 8.0
+# 定位球:可以直接射门的类型(角球/直接任意球/点球)的射门力度。
+KICK_POWER_SET_PLAY_SHOT = 10.0
+
 
 # ======================================================================
 # Player 走位控制
@@ -53,7 +58,7 @@ GUARD_FACE_BALL = True
 GUARD_THREAT_ENTER_X = -1.0
 GUARD_THREAT_EXIT_X = -0.7
 
-SUPPORT_DIST_M = 3.0
+SUPPORT_DIST_M = 3.5           # 支援点距球距离；必须 >3m,否则会踩 M-05(3m 内 10s 不动)罚下
 
 # ======================================================================
 # Normal 阶段策略
@@ -77,6 +82,39 @@ CENTER_LEAVE_DIST_M = 0.15 # 球离开中心点多少距离，认为球已经动
 
 OPP_SET_WALL_DIST_M = 2.0 # 对方开球时，在多少距离之后阻挡
 
+
+# ======================================================================
+# 裁判规则安全距离（实现依据见 docs/kb/referee-mechanics.md）
+# ======================================================================
+
+# 对方定位球：防守方在踢球方触球瞬间距球必须 >1.45m(规则判定线,不能低于)。
+RESTART_AVOID_RADIUS_M = 1.45
+# 防守时与球保持的目标距离(规则线+余量)。
+SET_PLAY_DEF_GAP_M = 2.7
+# 防守等待点距球距离；>3m 避开 M-05(球 3m 内 10s 不动罚下)。
+SET_PLAY_DEF_SAFE_DIST_M = 3.3
+# 对方开球时等待点距球距离；中圈半径 1.5,必须 >1.55 且在 >3m 外避开 M-05。
+OPP_KICKOFF_WAIT_RADIUS_M = 3.2
+# 门将退到门线附近时距门线的距离(m)。
+KEEPER_GOAL_LINE_INSET_M = 0.15
+# 门将站在门线附近时允许的 |y| 上限(门半宽 1.3,留余量)。
+KEEPER_GOAL_LINE_Y_LIMIT_M = 1.2
+# 门将待命点距球小于该值时做微移,避免 M-05。
+GUARD_INACTIVE_BALL_DIST_M = 2.9
+GUARD_SHUFFLE_DIST_M = 0.35
+GUARD_SHUFFLE_PERIOD_S = 2.5
+# 裁判 stopped(摆球)后允许移动的宽限期(裁判 MUST_STOP_GRACE_MS=1500)；只在这段时间内
+# 把离重启点太近的机器人撤离，之后必须完全静止，否则踩 stopped_motion(M-02)。
+# 注意:GameControl 发布间隔 500ms，我方看到 stopped 可能已晚 0~0.5s，所以这里只留
+# 0.7s(1.5 - 0.5 延迟 - 0.3 余量)，实测 1.2s 会在 2.7s 处被判定移动 0.45m 罚下。
+STOP_GRACE_MOVE_S = 0.7
+# 全向撤离(不转身)的最大平移速度(m/s)。
+OMNI_ESCAPE_SPEED = 1.8
+
+# 我方定位球：主罚距球小于该距离开始踢。
+SET_PLAY_NEAR_BALL_M = 2.2
+# 我方定位球：接应队员前插距离。
+SET_PLAY_RECEIVER_AHEAD_M = 3.5
 
 # ======================================================================
 # 站位 / 避让

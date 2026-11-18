@@ -18,7 +18,7 @@ import logging
 import math
 from typing import TYPE_CHECKING
 
-from .framework.types import Context, Penalty, Pose2D
+from .framework.types import Context, Penalty, Pose2D, SetPlay
 from .framework import debugdraw
 
 from .param import *
@@ -485,6 +485,37 @@ class Player:
                 self.set_velocity(vx, 0.0, self._angular(angle_err))
         return False
 
+    def omni_move_toward(
+        self,
+        target: tuple[float, float],
+        speed: float = OMNI_ESCAPE_SPEED,
+    ) -> None:
+        """全向平移向目标点靠近：不先转身，直接按体坐标 (vx, vy) 平移。
+
+        用于定位球摆球宽限期/对手主罚前的快速撤离。常规 ``walk_to`` 在远距离会
+        先原地转身(MAX_ANGULAR=2 rad/s，转 180° 约 1.6s)，而 1.45m 避让规则只
+        看「主罚触球瞬间」的位置，来不及转完就会吃 R-07；这里用 omni 步态省掉转身。
+        """
+        pose = self.pose
+        if pose is None:
+            self.stop()
+            return
+        dx = target[0] - pose.x
+        dy = target[1] - pose.y
+        distance = math.hypot(dx, dy)
+        if distance < ARRIVE_DIST:
+            self.stop()
+            return
+        v = min(speed, LINEAR_GAIN * distance)
+        wx = dx / distance * v
+        wy = dy / distance * v
+        cos_t = math.cos(pose.theta)
+        sin_t = math.sin(pose.theta)
+        vx = wx * cos_t + wy * sin_t
+        vy = -wx * sin_t + wy * cos_t
+        self.release_kick()
+        self.set_velocity(vx, vy, 0.0)
+
     def _path_waypoint(
         self, pose: Pose2D, path: list[tuple[float, float]],
     ) -> tuple[float, float]:
@@ -577,6 +608,25 @@ class Player:
         if kick_target is None:
             kick_target = opponent_goal(self.context)
 
+        # 球已出界(死球):不要贴着球站。裁判会把球摆回界内,摆球点就在出界点附近
+        # (球门球 (6,±2)、角球 (6.95,±4.45)、界外球 (±6.95,±4.45));站得太近会在
+        # 主罚触球瞬间被判 defender_touched_before_kick / R-07(iteration-09 实测两次)。
+        if (
+            abs(ball.y) > self.context.field.width / 2.0 - 0.15
+            or abs(ball.x) > self.context.field.length / 2.0 - 0.15
+        ):
+            self.action = "attack:ball_out"
+            half_l = self.context.field.length / 2.0
+            half_w = self.context.field.width / 2.0
+            self.walk_to(
+                (clamp(ball.x * 0.55, -half_l + 1.5, half_l - 1.5),
+                 clamp(ball.y * 0.55, -half_w + 1.5, half_w - 1.5)),
+                face=0.0,
+                avoid_ball=False,
+                avoid_robots=True,
+            )
+            return
+
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
         self._kicking = d <= (KICK_EXIT_M if self._kicking else KICK_ENTER_M)
         if self._kicking:
@@ -588,9 +638,33 @@ class Player:
             self.kick(kick_direction, kick_power)
         else:
             self.release_kick()
-            self.walk_to(
-                _behind_ball(ball.x, ball.y, kick_target, CHASE_BEHIND_M)
+            half_l = self.context.field.length / 2.0
+            # 只在【对方即将/正在重启】时放弃贴底线的球:追进去会站在对方重启点
+            # 旁边,主罚触球瞬间吃 R-07(1.45m 避让),摆球阶段还会因没静止吃 M-02。
+            # 但 NORMAL 比赛中的活球必须照常去踢——否则球停在底线附近没人碰,
+            # 30s 后裁判判 global_game_stuck 坠球(iteration-04 实测)。
+            g = self.context.game
+            restart_pending = g is not None and (
+                g.stopped
+                or (g.set_play is not None and g.set_play is not SetPlay.NONE)
             )
+            if restart_pending and ball.x > half_l - 0.35:
+                # 退到球后方 2.2m 处等重启:球贴对方底线时,若只退到固定 x 处,
+                # 对方 goalKick 摆球点(±6.0)可能在 1.45m 内 → 主罚触球瞬间吃
+                # R-07/defender_touched_before_kick(iteration-08 实测)。
+                self.action = "attack:hold_line"
+                half_w = self.context.field.width / 2.0
+                self.walk_to(
+                    (clamp(ball.x - 2.2, -half_l + 0.3, half_l - 0.3),
+                     clamp(ball.y * 0.3, -half_w + 0.3, half_w - 0.3)),
+                    face=0.0,
+                    avoid_ball=False,
+                    avoid_robots=True,
+                )
+                return
+            behind = _behind_ball(ball.x, ball.y, kick_target, CHASE_BEHIND_M)
+            behind = (min(behind[0], half_l - 0.5), behind[1])
+            self.walk_to(behind)
 
     def guard(self) -> None:
         """守门:站小禁区中央待命
@@ -604,6 +678,21 @@ class Player:
             return
 
         ball = self.context.ball if self.context is not None else None
+        ctx = self.context
+        half_l = ctx.field.length / 2.0
+
+        # 站位:回到小禁区中央(门线内侧 0.5m)。iteration-05 曾改成「门中心→球 射线
+        # 距离 1.0m」并加门将出击(sweep),但那版引用了未定义常量导致 agent 每帧崩溃;
+        # 崩溃修复后这两项改动未经验证,先回退到最稳的基线站位,等有干净的 baseline 再
+        # 逐步验证(见 docs/kb/iterations.md 的教训段)。
+        home = own_goal_area_center(ctx)
+
+        # 门线横移:把球的 y 投影到门线(限制在门柱内侧 ~0.25m),门将始终封住
+        # 「球→门中心」的射门角度。固定站中央时对方从肋部射门几乎必进
+        # (iteration-04/08 末段连续丢球的主要原因之一)。
+        if ball is not None:
+            cover_y = clamp(ball.y * 0.65, -1.05, 1.05)
+            home = (home[0], cover_y)
 
         # 待命朝向:朝球(便于快速反应);球不可见则朝对方门方向(默认 0)。
         face = 0.0
@@ -611,6 +700,19 @@ class Player:
             face = angle_to(
                 self.pose.x, self.pose.y, ball.x, ball.y,
             )
+
+        # 防 M-05:球就在待命点附近且长时间停滞时,小幅左右移动保持"活动"。
+        # (裁判按 3m 内 10s 几乎不动判罚;这里用 2.5s 周期的 ±0.35m 摆动。)
+        game = ctx.game if ctx is not None else None
+        if (
+            ball is not None
+            and ctx is not None
+            and (game is None or not game.stopped)
+            and dist(ball.x, ball.y, home[0], home[1]) < GUARD_INACTIVE_BALL_DIST_M
+        ):
+            shuffle = int(ctx.now / GUARD_SHUFFLE_PERIOD_S) % 2
+            dy = GUARD_SHUFFLE_DIST_M if shuffle == 0 else -GUARD_SHUFFLE_DIST_M
+            home = (home[0], clamp(home[1] + dy, -3.6, 3.6))
 
         self.action = "guard:home"
         debugdraw.point(
@@ -644,6 +746,8 @@ class Player:
         # 不越过己方底线(x >= 门线 + 0.3),横向夹进场内
         half_l = ctx.field.length / 2.0
         half_w = ctx.field.width / 2.0 - 0.3
+        # 纵深保险(x<=-1.5)在 iteration-08 实测让触球数从 40 掉到 18、比分 2:5,
+        # 说明支援压太靠后等于放弃中场;这里回退,支援按球中路附近站位即可。
         tx = clamp(tx, -half_l + 0.3, half_l)
         ty = clamp(ty, -half_w, half_w)
         self.move_to_position((tx, ty))

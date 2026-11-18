@@ -154,3 +154,9 @@ Thumbs.db
 old_src/*
 ref/*
 
+
+# Local run artifacts / fetched assets / match archives
+MUJOCO_LOG.TXT
+doc-fetch-resources/
+docs/kb/logs/
+tools/__pycache__/
