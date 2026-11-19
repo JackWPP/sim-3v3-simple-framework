@@ -25,13 +25,17 @@
 
 ## 2. 迭代记录
 
+> 快速/headless 迭代环境见 `headless.md`（不启 3D 渲染，1x 可跑满实时；`tools/headless_match.py` 一键对局）。
+
+## 2. 迭代记录
+
 阶段总结报告见 `final-report.md`（任务完成情况、战绩表、主要修复、下一步）。
 
 `iterations.md`：每一轮「改了什么 → 跑出什么比分/罚单/触球 → 为什么」的完整实验记录，
 以及**部署校验协议**（py_compile → `tools/check_names.py` → 部署后查 agent 日志
 `tick failed=0`/`teammates_seen=3/3`）。
 
-对局原始存档在 `logs/`：`baseline-01.json`、`iteration-02.json` … `iteration-12.json`
+对局原始存档在 `logs/`：`baseline-01.json`、`iteration-02.json` … `iteration-15.json`、`headless-01.json` …
 （每次 matchrun 自动保存 status + 全部裁判事件），`*-runner/` 是赛后拷出的容器运行日志。
 
 ## 3. 工具链
@@ -44,6 +48,9 @@
 | `tools/check_names.py` | 静态 AST 检查：`src/*.py` 里引用的全大写常量是否都在 `src/param.py` 定义（防部署后 NameError） |
 | `tools/bcmd.py` | 经 Studio DevTools 桥（127.0.0.1:8765）向 Studio 主进程发命令（build/run/start/end/get3v3MatchLogs 等） |
 | `tools/xgui.py` | 纯 ctypes X11 键鼠/截图（DISPLAY=:99），Studio 菜单与 DevTools 操作 |
+| `tools/headless_match.py` | **headless 一键对局**（不依赖 Studio UI/3D 渲染）：起 sim-lab 容器/仿真 → 装 agent → run.py 起两队 → /match/start → 可选 set_speed → 监视 → 存档 → 分析 |
+| `tools/headless_monitor.py` | headless 比赛监视/归档（标准 schema，供 `analyze_match.py` 使用；在容器内运行） |
+| `docs/kb/headless.md` | headless 环境搭建、容器布局、启动命令、已知坑（agent 激活 ~95s、run.py 超时需 180s）、实验结论 |
 
 ## 4. 策略代码
 

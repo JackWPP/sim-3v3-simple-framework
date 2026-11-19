@@ -29,6 +29,9 @@
 | iteration-10 | v1.6 出界后不贴球（attack:ball_out 后退） | 5 : 3 | **胜** | 4（倒地被罚下×2、开球站位×2） | 0 | 30 | 30 | 193 | 701 |
 | iteration-11 | v1.6 重跑（v1.7 尚未部署） | 3 : 2 | **胜** | **0** | 1（我们角球时对方 R-07 robot5） | 30 | 30 | 205 | 672 |
 | iteration-12 | v1.7 我方开球非主罚球员退回本方半场/圈外 | 1 : 3 | 负 | 1（倒地被罚下） | 0 | 45 | 45 | 224 | 662 |
+| iteration-13（无效） | v1.8 出界方向/射门力度/支援分离（引入 RobotState.id bug） | 0 : 4（中止） | 无效（每 tick AttributeError，全员冻结） | 1（inactiveRobot） | 0 | 13 | 12 | — | — |
+| iteration-14（提速实验局） | v1.8b（修复 RobotState.id）@ 2.0–2.5x 仿真提速 | 0 : 3 | 负（不作 1x 有效对比） | 1（robot1 fallenRobot，get_up FAILED） | 1（goalKick 干扰） | — | — | 171 | 342（墙钟） |
+| iteration-15 | v1.8b（定位球安全落点/射门力度随距离/支援分离/MAX_LINEAR 1.8）@ 1x | 4 : 2 | **胜** | **0** | 1（对方 robot4 fallenRobot） | 31 | 30 | 240 | 692（墙钟，sim 600，avg 0.87x） |
 
 ## 各轮改动要点
 
@@ -231,3 +234,88 @@ python3 tools/analyze_match.py docs/kb/logs/iteration-04.json
   2) 开球改为「回传/横传」而不是向前大脚，降低被反击风险；
   3) 减少三台机器人同时贴身抢球（被撞倒 + 乱战丢球）；
   4) 继续观察 fallenRobot 是否可接受为偶发。
+
+### iteration-13（v1.8，无效局）分析
+- 现象：0:4 惨败、TOUCHES home 13 : away 12、1 张 inactiveRobot（robot1，ballDistance=0.53m）、
+  2 次 global_game_stuck（+36.7s、+264.3s，30000ms 无人触球 → droppedBall）；
+  agent 日志 2931 次 `control loop tick failed`，异常 `AttributeError: 'RobotState' object has no attribute 'id'`。
+- 根因：v1.8 新增的 support() 横向分离块遍历 `ctx.teammates.values()` 并访问 `mate.id`；
+  但 `Context.teammates` 是 `dict[robot_id, RobotState]`，RobotState 没有 `.id` 字段
+  → 每 tick 抛异常 → 全员冻结（所以出现 30s 无人触球与 0:4）。
+- 修复：改为 `for mate_id, mate in ctx.teammates.items()`（key 就是机器人 id），并加注释；
+  同时 grep 复核 src/main.py / src/player.py 其余 `.id` 用法都是 Player 对象（安全）。
+- 教训：`tools/check_names.py` 只检查未定义的常量名，查不出属性误用；新增遍历/跨帧代码
+  必须对照 `src/framework/types.py` 的字段（RobotState 有 pose / fall_down_state / mode / penalty 等，无 id）。
+
+### iteration-14（v1.8b，2 倍速实验局，0:3）分析
+- 目的：验证「Studio 容器 + set_speed」能否把迭代速度提上来。target_speed_factor 2.0 / 2.5 时
+  比赛墙钟倍速实测 1.64x / 2.24x（受 Studio 3D 渲染争用限制，见下文性能实验）。
+- 结果：0:3（home 0 : away 3）、duration 342s 墙钟、events 171；26.4s robot1 因 fallenRobot 吃
+  incapableRobot 30s（upDot=0.55、height=0.09m、fallenDuration=10020ms）；127.6s global_game_stuck
+  （30026ms 无人触球 → droppedBall），后续再丢 2 球。agent 日志 `player 1 get_up ended: status=FAILED
+  error=Get-up command was sent but robot was not observed getting up within 5.000s`（官方 get_up 修复
+  正确上报失败，而不是静默卡住）。
+- 判断：2 倍速会放大控制/起身问题，**不能作为 1x 有效战绩**；但它证明了提速通道可用，
+  适合冒烟测试/观战，或后续做「倍速下鲁棒性」专题。
+- 归档修复：matchrun 的 watch 循环因桥 get3v3MatchStatus 单次耗时 35–46s 而失效；
+  改为直接从容器取数：`/status`、`/events/history?limit=5000`（**默认 limit 只有 50**）、
+  `/result`（全量 match 字段，但无 events），再 `docker cp /run/3v3_runner`，
+  手工重建 `docs/kb/logs/iteration-14.json` 后用 `tools/analyze_match.py` 出摘要。
+
+### iteration-15（v1.8b，1x 干净验证，4:2 胜）分析
+
+- **结果**：home 4 : away 2，胜。duration 691.9s 墙钟（sim 600s，平均 0.87x，ratio 0.69–0.99 随 Studio 渲染争用波动），
+  events 240，触球 31:30，**我方 0 罚单**（v1.8/v1.8b 首次在干净 1x 口径验证；此前 iteration-04/11 也是 0 罚单，
+  但那时是 v1.3/v1.6，v1.8 的定位球安全落点改动首次验证）。
+- **进球时间线**：away 142.5（0:1）→ home 197.4（1:1）→ home 288.6（2:1）→ home 423.0（3:1）→ away 505.3（3:2）
+  → home 547.2（4:2）。首次在 v1.8 下多次落后/被追平后仍净胜 2 球，说明进攻端改善有效。
+- **对方唯一罚单**：arena robot4 fallenRobot 358.6s（对方自己被罚下 30s），我方 0；
+  与 iteration-14（2 倍速时我方 robot1 起身失败/摔倒被罚）对照，说明摔倒/起身失败是**提速导致**，1x 下稳定。
+- **32.9s global_game_stuck**：开赛后约 30s 无人触球 → 坠球。说明开球后前 30s 进攻推进太慢（站位远/第一脚力度不足），
+  是下一轮重点（开球后主动抢第一脚、提高前场触球概率）。
+- **出界偏多**：throw_in_setup 10 次、corner_kick_setup 2 次、goal_kick_setup 3 次（总数比 i11 多），
+  球频繁出界说明常规进攻射门角度/力度仍不够收敛；v1.8 的定位球方向已不再直接踢出界，但 plan_kick 的射门瞄准可继续调。
+- **结论**：v1.8b 在 1x 有效局下成立（4:2 胜 + 0 罚单），作为当前最优版本；下一步：开球后前 30s 主动触球、
+  射门角度收敛、减少不必要出界、迭代提速（1.5x 折中或 headless 纯物理）。
+
+### 性能优化实验（2026-11-19，用户诉求 m02380：0.6x 太慢 → 省资源、快速迭代）
+- 结论 1（运行期提速）：容器内 sim venv 连 `ws://127.0.0.1:8788`，发
+  `{"type":"command","command":"set_speed","params":{"speed_factor":N}}` 即可。1.0x 基线约 486
+  physics steps/s（dt≈2ms），2.0→821 steps/s（actual 2.0），3.0→1009（actual 2.59），4.0→1317
+  （actual 4.0）；物理-only 上限约 1300 steps/s（≈2.7x）。Studio 同时做 3D 渲染时实际倍速
+  约 1.6–2.2x（渲染争用 CPU）。
+- 结论 2（headless 物理可行、完整比赛卡住）：/tmp/headless/{simsrc,library} + `virtual-robot:0.9.10-alpha-humble`
+  + `--no-camera-relay --no-extension-process --no-clock-publisher --no-motion-* --no-control-server`
+  可跑纯物理（500 步 step_us_p50=500µs）；但完整比赛链路（run.py 起 sandbox 激活 agent）失败：
+  team_1 45s 未 Active，agent 日志 Booster OS 初始化出现 `Service not available`、
+  `booster-cli robot_info timed out`、`Check failed: call_ == nullptr`（缺 Studio 会话下游服务，
+  RpcService/agent manager 承载）→ 修复代价大，暂缓。
+- 结论 3：提速不能用于策略有效性验证（2x 下摔倒/起身失败明显增加）；1x 仍是有效战绩唯一口径。
+- 复现：
+  `docker cp /tmp/set_speed.py h5t6r-k1:/tmp/`
+  `docker exec h5t6r-k1 /usr/local/booster_robot/booster_robocup_sim/.venv/bin/python /tmp/set_speed.py 2.0`
+  （恢复 1x 传 1.0；比赛进行中/结束后均可设，对新比赛也生效）。
+- TODO（可选后续）：Studio 关掉 simulator 3D 窗口后的倍速上限；给 run.py 补 agent 激活所需服务；
+  用 taskset 把渲染进程隔离到少数核。
+
+
+## 性能/headless 实验（2026-11-19 晚）
+
+**目标**：绕开 Studio 3D 渲染，把「改代码 → 跑一场」的迭代周期压短。
+
+- Studio 模式实测：target=1.0 时实际 **0.69–0.99x**（3D 渲染/相机管线争用 CPU ~1.5-2 核），
+  一场墙钟约 690–850s；`set_speed` 2.0 时实际 1.6–2.2x，但 2x 下摔倒/起身失败增加，
+  不能作为策略有效性口径。
+- headless 模式（`docs/kb/headless.md`，`tools/headless_match.py`）：不启渲染，1x 时
+  实际 **0.97–0.99x**；`set_speed` 比赛中途生效后实测 ~1.2-1.5x（受 agent 进程与扩展 CPU 限制）。
+- 结果：
+  - headless-01：**2:1 胜**，墙钟 612s；后段出现冻结（~326s 后无触球、反复 global_game_stuck），
+    记为无效/待复现。
+  - headless-02：**2:1 胜**，墙钟 500s（开赛约 40s 后 set_speed(2.0)），全程触球到 575s，
+    仅 1 次 game_stuck → headless 链路有效。
+- 关键修复：headless 中 agent 激活耗时 ~95s（Booster OS 初始化超时回退），
+  `run.py` 的 `wait_for_agents_ready` 超时需从 45s 调到 **180s**，否则误报
+  `timed out waiting for agent lifecycle activation`。
+- 产物：`docs/kb/logs/headless-01.json`、`headless-02.json`（+`*-runner/`）、`headless.md`。
+- 待办：复现/修复 headless-01 后段冻结；研究降低 95s 激活开销；把 headless 结果纳入
+  每轮迭代的快速烟测流程（Studio 作为最终口径）。

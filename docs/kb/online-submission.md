@@ -11,7 +11,7 @@
 |---|---|
 | 产物路径 | `build/com.example.lqinternalmatch-1.1.0.agent` |
 | 大小 | 830,718 字节（约 0.8 MB） |
-| sha256 | `8b0c4fb642b4012e0c6ab27d89bab5955bb3988a77a9e8daacc860213267d4f4` |
+| sha256 | `c1f0e4cb2138e46a16d92505769c60bae85c56b1b80cbc8da6028ce31062ad08` |
 | agent id / version | `com.example.lqinternalmatch` / `1.1.0` |
 | 入口 | `src/main.py:SoccerSimAgent`（`agent.toml`） |
 
