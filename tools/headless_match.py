@@ -147,6 +147,9 @@ def install_agents(pkg: Path | None) -> None:
 
 # ---------------------------------------------------------------- match control
 def start_runner(timeout: float = 300) -> None:
+    # 上一场结束后的 /tmp/booster_agent* 残留会让新 sandbox 启动即退出
+    # （run.py 报 "agent sandbox exited before lifecycle activation"），先清掉。
+    dexe("rm -rf /tmp/booster_agent /tmp/booster_agent_deploy; pkill -f '[p]ython3 -u run.py' || true", timeout=30)
     log("starting football3v3_runner for both teams (agent activation takes ~95s)")
     dexec_background(f"cd /match && python3 -u run.py --teams {OURS} {AI}", "/tmp/match_run.log")
     t0 = time.time()
@@ -160,6 +163,23 @@ def start_runner(timeout: float = 300) -> None:
             raise RuntimeError("agent activation timed out:\n" + out[-2000:])
         time.sleep(5)
     raise RuntimeError("agents never became active:\n" + dexe("tail -c 3000 /tmp/match_run.log").stdout[-2000:])
+
+
+def wait_match_playing(timeout: float = 60.0) -> None:
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            raw = dexe(f"curl -s --max-time 3 {GC}/status", timeout=20).stdout
+            st = json.loads(raw)
+            m = st.get("match") or {}
+            game = m.get("game") or {}
+            if m.get("status") == "active" and game.get("state") in ("ready", "set", "playing"):
+                log(f"match active: state={game.get('state')}")
+                return
+        except Exception:
+            pass
+        time.sleep(2)
+    log("warning: match did not become active before monitor; continuing anyway")
 
 
 def start_match() -> dict:
@@ -259,6 +279,9 @@ def main() -> int:
     if abs(args.speed - 1.0) > 1e-6:
         time.sleep(2)
         set_speed(args.speed)
+    # 等比赛真正进入 playing 再启动 monitor：/match/start 后有一段 ready 阶段，
+    # 若立即启动 monitor 可能读到上一场遗留的 finished 状态而提前归档（headless-04 踩过）。
+    wait_match_playing()
     doc = monitor(args.tag, args.timeout)
     summarize(doc)
     # analyze

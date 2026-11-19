@@ -288,12 +288,16 @@ def _defender_set_play_spot(context: Context, ball, lateral: float) -> tuple[flo
     return _keep_clear_of_ball(context, ball, (tx, ty))
 
 
-def _set_play_kick_plan(context: Context, set_play: SetPlay, ball) -> tuple[float, float]:
+def _set_play_kick_plan(
+    context: Context, set_play: SetPlay, ball, taker_id: int | None = None,
+) -> tuple[float, float]:
     """我方定位球:返回(场地系踢球方向, 力度)。
 
     - 角球:几何上无法直接射入,朝门前抢点位置传中;
     - 直接任意球/点球:直接打门;
-    - 界外球/球门球/间接任意球:向前场踢。第一脚禁止朝己方门,否则乌龙无效。
+    - 界外球/球门球/间接任意球:必须二次触球才允许进球,所以第一脚改成
+      短传给最近的队友(队友触球=第二次触球),不要直接长传打门。
+      (headless-04 实测 3 次 goal_disallowed_indirect:开球方一脚直接进球无效)
     """
     gx, gy = opponent_goal(context)
     half_length = context.field.length / 2.0
@@ -309,13 +313,30 @@ def _set_play_kick_plan(context: Context, set_play: SetPlay, ball) -> tuple[floa
             target = (gx, gy)
             power = KICK_POWER_SET_PLAY_SHOT
     else:
-        # 界外球/球门球/间接任意球:只往前推进 SET_PLAY_FORWARD_M,不瞄底线。
-        # iteration-12 教训:力度 8.0 + 瞄底线会把球踢出边线/底线,单场 13 次定位球。
-        target = (
-            min(ball.x + SET_PLAY_FORWARD_M, half_length - SET_PLAY_TARGET_MARGIN_M),
-            clamp(ball.y * 0.4, -2.4, 2.4),
-        )
-        power = KICK_POWER_SET_PLAY_FORWARD
+        # 界外球/球门球/间接任意球:需二次触球才能进球。第一脚短传给最近的
+        # 队友,由队友完成第二次触球后再进攻;没有队友可传时退化为向前推。
+        mate = None
+        best = math.inf
+        for mate_id, mate_state in context.teammates.items():
+            if mate_id == taker_id or mate_state.pose is None:
+                continue
+            d = dist(ball.x, ball.y, mate_state.pose.x, mate_state.pose.y)
+            if d < best:
+                best = d
+                mate = mate_state
+        if mate is not None and best > 0.6:
+            target = (
+                clamp(mate.pose.x, -half_length + 0.6, half_length - 0.6),
+                clamp(mate.pose.y, -context.field.width / 2.0 + 0.6,
+                       context.field.width / 2.0 - 0.6),
+            )
+            power = KICK_POWER_SET_PLAY_PASS
+        else:
+            target = (
+                min(ball.x + SET_PLAY_FORWARD_M, half_length - SET_PLAY_TARGET_MARGIN_M),
+                clamp(ball.y * 0.4, -2.4, 2.4),
+            )
+            power = KICK_POWER_SET_PLAY_FORWARD
     return angle_to(ball.x, ball.y, target[0], target[1]), power
 
 
@@ -375,8 +396,28 @@ def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
         return
 
     attacker.action = "kickoff"
-    # 朝 +x(对方半场)踢;开球后主罚触球即 ball_free,不必等 10s。
-    attacker.kick(0.0, KICK_POWER_OUR_KICKOFF)
+    # 开球第一脚必须短传/带球,不能直接射门:G-05 要求开球方开球后进球需
+    # 「≥2 台机器人触球」或「触球点距开球点>0.5m」,直接射门进球会被判无效
+    # （headless-06 +148.3s goal_disallowed_kickoff 实测）。这里把球短传给
+    # 最近的队友,队友触球即完成第二次触球;之后正常进攻再射门就合法。
+    ball = context.ball
+    receiver = None
+    best = math.inf
+    for mate in players:
+        if mate is attacker or mate.pose is None:
+            continue
+        bx, by = (ball.x, ball.y) if ball is not None else (0.0, 0.0)
+        d = dist(bx, by, mate.pose.x, mate.pose.y)
+        if d < best:
+            best = d
+            receiver = mate
+    if receiver is not None and ball is not None and best > 0.5:
+        kick_dir = angle_to(ball.x, ball.y, receiver.pose.x, receiver.pose.y)
+        attacker.kick(kick_dir, KICK_POWER_OUR_KICKOFF_PASS)
+    else:
+        # 没有可传队友时的兜底:侧向轻推,避免直接打门被判无效。
+        side = 1.0 if attacker.id % 2 == 0 else -1.0
+        attacker.kick(angle_to(0.0, 0.0, -1.0, side * 1.5), KICK_POWER_OUR_KICKOFF_PASS)
 
     rest = [p for p in players if p is not attacker]
     if rest:
@@ -486,7 +527,7 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     store.set_play_taker = taker.id
     rest = [p for p in players if p is not taker]
 
-    kick_dir, power = _set_play_kick_plan(context, set_play, ball)
+    kick_dir, power = _set_play_kick_plan(context, set_play, ball, taker.id)
     taker.action = f"setplay:{set_play.value}"
     if dist(taker.pose.x, taker.pose.y, ball.x, ball.y) > SET_PLAY_NEAR_BALL_M:
         # 先绕到球的"踢球侧"(贴边线时会被夹进场内,足够接近后下一帧直接踢)。
@@ -528,6 +569,15 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
     等官方状态 set_play 清空(ball_free)后,下一帧自动切回 NORMAL 再抢。
     """
     if not players:
+        return
+    # 摆球阶段(referee stopped=True)必须全静止:此时任何移动都可能被判
+    # motionInSet(30s);get_phase 一般已把 stopped 路由到 _act_stopped,
+    # 这里再兜底一次,避免 phase 判定竞态造成的摆球期移动。
+    g = context.game
+    if g is not None and g.stopped:
+        for p in players:
+            p.action = "setplay:placement"
+            p.stop()
         return
     ball = context.ball
     if ball is None:
@@ -615,9 +665,13 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
     for p in players:
         if can_vacate and ball is not None and p.pose is not None:
             d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
-            if d_ball < SET_PLAY_DEF_GAP_M:
-                lateral = -1.2 if p.id % 2 == 0 else 1.2
-                target = _defender_set_play_spot(context, ball, lateral)
+            # 只撤离真正踩在 R-07 风险圈里的机器人:距离越远、动作越多越容易
+            # 在 grace 之后还继续动而吃 M-02(stopped_motion)。目标只放到 1.8m,
+            # 保证 0.3s 宽限内走完,同时避开 1.45m 判定线。
+            if d_ball < RESTART_AVOID_RADIUS_M + 0.15:
+                target = _away_from_ball_point(
+                    context, ball, p.pose, RESTART_AVOID_RADIUS_M + 0.35
+                )
                 p.action = "stopped:vacate"
                 p.omni_move_toward(target)
                 continue

@@ -1,6 +1,6 @@
 # 上线提交清单（Booster Champion 3v3 第二季）
 
-> 适用版本：v1.8（本文件随每轮迭代更新）。
+> 适用版本：**v1.14**（2026-11-19 深夜定稿；本文件随每轮迭代更新）。
 > 说明：本地已完成构建与验证，**上传由队主自行在赛事官网操作**；本文件是照着做即可的步骤清单。
 > 赛事主页：<https://booster.feishu.cn/wiki/Bikkw85DNiz4aWkhXmdciFCxnkg>
 > 官网：<https://champion.booster.tech>
@@ -10,20 +10,34 @@
 | 项 | 值 |
 |---|---|
 | 产物路径 | `build/com.example.lqinternalmatch-1.1.0.agent` |
-| 大小 | 830,718 字节（约 0.8 MB） |
-| sha256 | `c1f0e4cb2138e46a16d92505769c60bae85c56b1b80cbc8da6028ce31062ad08` |
+| 大小 | 832,945 字节（约 0.8 MB） |
+| sha256 | `7168f2462ab50d59b59bb64ea999533dcfa959ec707d29c00d878d015c01ad12` |
 | agent id / version | `com.example.lqinternalmatch` / `1.1.0` |
 | 入口 | `src/main.py:SoccerSimAgent`（`agent.toml`） |
 
 > 校验：上传前可在本机执行 `sha256sum build/*.agent`，确认与上表一致；
 > 每次重新构建后本表会更新（以 `docs/kb/iterations.md` 对应轮次记录为准）。
 
+### 1.1 本版本相对 v1.8 的主要变化（更合规、更进攻）
+
+- v1.9：出界后立刻后退（`attack:ball_out` 按官方出界线+余量触发）、摆球期撤离收窄到 1.6m。
+- v1.10：取消摆球期移动（`STOP_GRACE_MOVE_S=0.0`）；贴边线保持距离（后被 v1.12 移除）。
+- v1.11：需二次触球的定位球改为**短传给队友**，由队友完成第二触球再射。
+- v1.12：删除「活球时远离球」的启发式（会触发 30s 无触球僵局），改为只在踢球瞬间贴线解围。
+- v1.13：**开球第一脚改为短传队友**（不再从开球点直接射门，杜绝 G-05 无效进球）。
+- v1.14：出界后退距离加大到 ≥2.4m，降低对方快发界外球时被罚 R-06/R-07 的概率。
+- 最新验证：headless-08（v1.14）3:2 胜、我方 **0 罚单**、0 次 game_stuck、0 次无效进球；
+  Studio 1x 侧最近一次有效验证为 iteration-15（v1.8b）4:2 胜、0 罚单。
+
 ## 2. 重新构建（改了代码之后）
 
 方式 A（推荐，官方 GUI）：Booster Studio 打开本工程 → 右上角 **Build Agent Only**（锤子图标）
 → 等 `Agent Dev` 输出面板出现 `Built ... successfully` → `build/` 下生成新 `.agent`。
 
-方式 B（命令行，走已注入的 DevTools 桥）：
+方式 B（命令行，走已注入的 DevTools 桥；**注意**：Studio 长时间运行后注入的 BOOT_JS 可能
+仍是旧的 20s 超时，`bcmd stop/run` 会返回 `timeout`。此时先「开发人员: 重新加载窗口」，
+再「帮助 → 切换开发人员工具」并在 Console 注入
+`fetch('http://127.0.0.1:8765/boot.js').then(r=>r.text()).then(eval)` 即可恢复 240s 超时）：
 
 ```bash
 cd /home/xgx/wpp1/sim-3v3-simple-framework

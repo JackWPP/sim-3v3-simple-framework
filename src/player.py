@@ -625,16 +625,29 @@ class Player:
         # 球已出界(死球):不要贴着球站。裁判会把球摆回界内,摆球点就在出界点附近
         # (球门球 (6,±2)、角球 (6.95,±4.45)、界外球 (±6.95,±4.45));站得太近会在
         # 主罚触球瞬间被判 defender_touched_before_kick / R-07(iteration-09 实测两次)。
+        # 判据用「球心真正越过线」（官方 |y|-(0.11+0.025)>4.5 等），不能提前到
+        # width/2-0.15：球贴着边线但仍在场内时若提前撤退，就没人去碰球，
+        # 30s 后裁判判 global_game_stuck（iteration-15 开局 32.9s 实测）。
         if (
-            abs(ball.y) > self.context.field.width / 2.0 - 0.15
-            or abs(ball.x) > self.context.field.length / 2.0 - 0.15
+            abs(ball.y) > self.context.field.width / 2.0 + 0.15
+            or abs(ball.x) > self.context.field.length / 2.0 + 0.15
         ):
             self.action = "attack:ball_out"
             half_l = self.context.field.length / 2.0
             half_w = self.context.field.width / 2.0
+            # 撤到离出界点更远处(≥2.4m):出界后裁判立刻把摆球点放在原地附近,
+            # 我们若只剩 1.5-2m,对方快发界外球时容易在 1.45m 内被判
+            # defender_touched_before_kick(headless-07 +14.4s 实测 30s 罚下)。
+            tx = ball.x * 0.35
+            ty = ball.y * 0.35
+            ddx, ddy = tx - ball.x, ty - ball.y
+            dd = math.hypot(ddx, ddy)
+            if dd < 2.4:
+                k = 2.4 / max(dd, 1e-6)
+                tx, ty = ball.x + ddx * k, ball.y + ddy * k
             self.walk_to(
-                (clamp(ball.x * 0.55, -half_l + 1.5, half_l - 1.5),
-                 clamp(ball.y * 0.55, -half_w + 1.5, half_w - 1.5)),
+                (clamp(tx, -half_l + 1.5, half_l - 1.5),
+                 clamp(ty, -half_w + 1.5, half_w - 1.5)),
                 face=0.0,
                 avoid_ball=False,
                 avoid_robots=True,
@@ -644,6 +657,14 @@ class Player:
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
         self._kicking = d <= (KICK_EXIT_M if self._kicking else KICK_ENTER_M)
         if self._kicking:
+            half_l = self.context.field.length / 2.0
+            half_w = self.context.field.width / 2.0
+            if abs(ball.x) > half_l - 1.0 or abs(ball.y) > half_w - 1.0:
+                # 贴线活球:朝场中心解围。不要把球往场外踢(v1.10 的"保持距离"
+                # 分支反而让球 30s 无人触碰 → global_game_stuck；headless-04/05 实测)。
+                self.action = "attack:line_clear"
+                self.kick(angle_to(ball.x, ball.y, 0.0, 0.0), KICK_POWER_LINE_CLEAR)
+                return
             kick_plan = self.plan_kick()
             if kick_plan is None:
                 self.stop()

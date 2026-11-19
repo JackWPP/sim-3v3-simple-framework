@@ -23,16 +23,20 @@ KICK_POWER_DEFAULT = 5.0
 # 门前轻推避免打飞,远射加大力度;上限 8.5 防止高力度踢球摔倒。
 KICK_POWER_BASE = 4.5
 KICK_POWER_PER_M = 0.5
-KICK_POWER_CAP = 8.5
+KICK_POWER_CAP = 8.0
 KICK_POWER_BACKFIELD = 5.0
 KICK_POWER_OUR_KICKOFF = 5.0
+KICK_POWER_OUR_KICKOFF_PASS = 4.2  # 开球第一脚短传给队友(直接射门无效:G-05 需二次触球)
+
 
 # 定位球:向前场踢出(界外球/球门球/间接任意球)的力度。
 # iteration-12 实测 8.0 会把球直接踢出边线(单场 8 次 throwIn + 3 次 goalKick),
 # 降到 5.5 只求稳稳推进、把球留在场内。
-KICK_POWER_SET_PLAY_FORWARD = 5.5
+KICK_POWER_SET_PLAY_FORWARD = 5.0
 # 定位球:可以直接射门的类型(角球/直接任意球/点球)的射门力度。
 KICK_POWER_SET_PLAY_SHOT = 8.0
+KICK_POWER_SET_PLAY_PASS = 4.0   # 需二次触球的定位球(界外球/球门球/间接任意球)第一脚短传给队友
+
 # 我方定位球:向前推进的目标距离(m),以及目标点离边线/底线的安全余量(m)。
 SET_PLAY_FORWARD_M = 4.0
 SET_PLAY_TARGET_MARGIN_M = 1.2
@@ -119,9 +123,12 @@ GUARD_SHUFFLE_PERIOD_S = 2.5
 # 把离重启点太近的机器人撤离，之后必须完全静止，否则踩 stopped_motion(M-02)。
 # 注意:GameControl 发布间隔 500ms，我方看到 stopped 可能已晚 0~0.5s，所以这里只留
 # 0.7s(1.5 - 0.5 延迟 - 0.3 余量)，实测 1.2s 会在 2.7s 处被判定移动 0.45m 罚下。
-STOP_GRACE_MOVE_S = 0.7
+STOP_GRACE_MOVE_S = 0.0
 # 全向撤离(不转身)的最大平移速度(m/s)。
-OMNI_ESCAPE_SPEED = 1.8
+OMNI_ESCAPE_SPEED = 1.2
+LINE_HOLD_MAX_S = 6.0        # 球贴边线时最多保持距离等待的时间,超时改为向场内解围
+KICK_POWER_LINE_CLEAR = 4.5  # 贴边线活球解围(向场内)力度
+
 
 # 我方定位球：主罚距球小于该距离开始踢。
 SET_PLAY_NEAR_BALL_M = 2.2

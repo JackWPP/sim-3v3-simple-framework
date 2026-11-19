@@ -2,7 +2,8 @@
 
 > 目标：不启动 Booster Studio 的 3D 渲染/相机管线，直接在 docker 内跑完整 3v3 比赛，
 > 把「改代码 → 构建 → 跑一场 → 拿结果」的迭代周期压到最短。
-> 当前状态：**已跑通完整比赛**（headless-01: 2:1 胜，墙钟 612s ≈ 0.98x 实时）；
+> 当前状态：**已跑通完整比赛并用于策略迭代**（v1.9→v1.14 共 6 场：
+> headless-03 4:0 胜、headless-08 3:2 胜且 0 罚单 0 僵局 0 无效进球，单场墙钟 ~480-500s ≈1.25x）。
 > 已知遗留问题见文末「已知问题」。
 
 ## 1. 为什么更快
@@ -79,6 +80,33 @@ python3 tools/headless_match.py --tag headless-03 --speed 2.0  # 2x 提速
 产物：`docs/kb/logs/<tag>.json`、`<tag>-runner/`（含 team_1/team_2 agent 日志）、
 `<tag>-summary.txt`。
 
+## 3.5 离线构建 .agent（不依赖 Studio GUI）
+
+headless 迭代不需要 Studio 的 Build Agent Only，可直接在 agent-dev 镜像里构建：
+
+```bash
+docker run --rm --entrypoint bash   -e AGENT_SIGN_KEYSTORE=/.agent_dev/keystore.p12 \
+  -e AGENT_SIGN_KEYSTORE_PASSWD=123456 \
+  -v "$PWD":/workspace/src/b4dda6cfc949d2cf921c81c2b976183d \
+  booster-robotics-registry.cn-beijing.cr.aliyuncs.com/agent-dev/agent-dev:0.9.17-alpha-humble \
+  -lc 'cd /workspace/src/b4dda6cfc949d2cf921c81c2b976183d && /sdk/agent_bundler/build_pyagent .'
+```
+
+要点：
+- 镜像 entrypoint 是 `exec "$@"`，必须 `--entrypoint bash` 才能用 `-lc`；
+- 镜像内自带签名 keystore：`/.agent_dev/keystore.p12`（密码 123456，Studio 只用同一份）；
+  省略 `[sign]` 时 builder 从环境变量 `AGENT_SIGN_KEYSTORE` / `AGENT_SIGN_KEYSTORE_PASSWD` 读取；
+- 产物写到 `build/<id>-<version>.agent`，随后 `tools/headless_match.py` 会自动安装最新的；
+- 完整「改代码 → 构建 → headless 跑一场 → 分析」示例：
+
+```bash
+python3 -m py_compile src/main.py src/player.py src/param.py && python3 tools/check_names.py
+docker run --rm --entrypoint bash -e AGENT_SIGN_KEYSTORE=/.agent_dev/keystore.p12 \
+  -e AGENT_SIGN_KEYSTORE_PASSWD=123456 -v "$PWD":/workspace/src/b4dda6cfc949d2cf921c81c2b976183d \
+  <agent-dev-image> -lc 'cd /workspace/src/b4dda6cfc949d2cf921c81c2b976183d && /sdk/agent_bundler/build_pyagent .'
+python3 -u tools/headless_match.py --tag headless-03 --timeout 900
+```
+
 ## 4. 关键坑与修复
 
 1. **agent 激活超时（最重要）**：headless 中 agent 从启动到 Active 约 **95s**（Studio 里 2.3s）。
@@ -107,6 +135,12 @@ python3 tools/headless_match.py --tag headless-03 --speed 2.0  # 2x 提速
 |---|---|---|---|---|
 | headless-01 | **2 : 1 胜** | 612s（sim 600s） | ≈0.98x | 无 set_speed；后段出现冻结（见已知问题） |
 | headless-02 | **2 : 1 胜** | 500s（sim 600s） | ≈1.2x | 开赛约 40s 后 set_speed(2.0)（比赛中途生效）；全程触球到 575s，仅 1 次 game_stuck |
+| headless-03 | **4 : 0 胜** | 481.8s | ≈1.25x | v1.9；我方 2 罚（出界后贴球）、对方 4 罚；touch 51；1 次无效进球 |
+| headless-04 | 1 : 1 平 | 391.3s | ≈1.25x | v1.10；line_hold 过度保守：2 次 game_stuck、3 次 goal_disallowed_indirect |
+| headless-05 | 0 : 2 负 | 451.4s | ≈1.25x | v1.11；line_clear 目标点被 clamp 回场内→4 次 game_stuck、touch 仅 25 |
+| headless-06 | 2 : 4 负 | 471.7s | ≈1.25x | v1.12；stuck 归零、touch 46；1 次 opening 直接射门无效（G-05） |
+| headless-07 | 0 : 1 负 | 481.5s | ≈1.25x | v1.13；开球改短传后 0 次无效进球；1 罚（对方快发界外球贴太近）、2 次 stuck |
+| headless-08 | **3 : 2 胜** | 481.5s | ≈1.25x | v1.14；**0 罚单、0 stuck、0 无效进球、touch 73**（当前最佳） |
 
 - 对比 Studio（v1.8b, 1x target）：4:2 胜 / 692s ≈0.87x；headless 无 3D 渲染时可达 0.98x，
   开 set_speed 后可到 ~1.2-1.5x（受 agent 进程与扩展 CPU 限制，未达物理-only 的 2.7x）。
@@ -114,13 +148,16 @@ python3 tools/headless_match.py --tag headless-03 --speed 2.0  # 2x 提速
 
 ## 6. 已知问题（待解决）
 
-- **headless-01 后段冻结（headless-02 未复现）**：soccer 时钟 ~326s 后全场再无 ball_touch；
-  ~350s 双方各吃 inactiveRobot，此后每 40s 一次 global_game_stuck→dropped ball 循环。
-  怀疑与 headless 下 embedded motion / 球-机器人接触或上一轮单队测试残留 agent 有关；
-  复现后再排查。→ 重要结论仍以 Studio 为准，headless 用于快速烟测/迭代。
-- 激活固定开销 ~95s；可考虑预启动 agent sandbox / 缓存 robot_info 进一步压缩。
+- **headless 结果波动大**：同一版本不同局比分可从 0:2 到 4:0（BoosterAI 行为受随机性影响）；
+  战术有效性仍以多场统计 + Studio 1x 为准，headless 主要用于淘汰明显违规/僵局/崩溃。
+- **headless-01 后段冻结（未复现）**：soccer 时钟 ~326s 后全场再无 ball_touch；
+  怀疑与 embedded motion/球接触有关；headless-02 之后再未出现，暂按随机异常处理。
+- **激活固定开销 ~95-105s**：就绪等待超时必须 ≥180s；可考虑预启动 sandbox 进一步压缩。
 - `robot_info.txt`、`/opt/booster/bin` 服务栈在 headless 容器中缺失（Studio 启动时注入）；
   目前不影响激活与比赛。
+- **Studio 部署通道当前不可用**：DevTools 注入的 BOOT_JS 超时仍是 20s（需要重载窗口重新注入
+  240s 版本），`bcmd stop/run` 会返回 timeout；Studio 1x 复验暂时只能用旧版（iteration-15 的
+  v1.8b 4:2）。恢复步骤：重载 Studio 窗口 → 帮助→切换开发人员工具 → 注入 boot.js。
 
 ## 6. 参考：与 Studio 的等价关系
 

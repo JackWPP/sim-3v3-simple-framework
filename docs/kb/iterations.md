@@ -319,3 +319,131 @@ python3 tools/analyze_match.py docs/kb/logs/iteration-04.json
 - 产物：`docs/kb/logs/headless-01.json`、`headless-02.json`（+`*-runner/`）、`headless.md`。
 - 待办：复现/修复 headless-01 后段冻结；研究降低 95s 激活开销；把 headless 结果纳入
   每轮迭代的快速烟测流程（Studio 作为最终口径）。
+
+### headless-03（v1.9 首次验证，4:0 胜）分析
+
+- 代码：v1.9 = 停摆期移动收紧（`STOP_GRACE_MOVE_S` 0.7→0.3、`OMNI_ESCAPE_SPEED` 1.8→1.2、
+  只撤离距球 <1.6m 的机器人）、`attack()` 的 ball_out 判据改用官方出界线+余量
+  （`|x|>half_l+0.15` / `|y|>half_w+0.15`，避免球仍在场内就放弃追球导致 30s 僵局）、
+  定位球力度下调（FORWARD 5.5→5.0、CAP 8.5→8.0）、`_act_opp_set_play` 增加 stopped 兜底全静止。
+- 首次使用**离线构建**（agent-dev 镜像 + `AGENT_SIGN_KEYSTORE=/.agent_dev/keystore.p12` 等），
+  不再依赖 Studio GUI 构建；构建 12s。
+- 结果：**4 : 0 胜**（home 4 : away 0），墙钟 481.8s（仿真 600s；headless 容器中模拟器
+  target 仍沿用上一场的 2.0，实测约 1.25x），268 events，touch 26:25。
+- 罚单：我方 2 / 对方 4。
+  - 我方：robot3 `defender_touched_before_kick`（+233.6s，对方 throwIn，pos (6.65,-4.44)）、
+    robot2 `stopped_motion`（+88.1s，对方 throwIn 摆球，moved 0.320m，durationSinceStopped 2498ms）。
+  - 对方：2× `defender_touched_before_kick`（我方 throwIn/corner 被干扰）、
+    2× `free_kick_avoidance_radius`（我方 cornerKick 时对方 robot4/robot6 分别 0.94m/0.54m）。
+- 结论：进攻端明显改善（4 球，早期主动性 OK）；剩余我方罚单全是「球在角落/边线附近出界前
+  贴得太近」的同一机制：v1.9 只在球**已出界**后才撤退，球滚向边线时仍贴上去抢，
+  出界后裁判把摆球点放在原地附近 → 我们就在 1.45m 内。→ v1.10 修复见下。
+- 归档：docs/kb/logs/headless-03.json、headless-03-runner/、headless-03-summary.txt。
+
+## v1.9 / v1.10 改动清单（2026-11-19 晚）
+
+### v1.9（headless-03 验证）
+- `src/param.py`：`STOP_GRACE_MOVE_S` 0.7→0.3；`OMNI_ESCAPE_SPEED` 1.8→1.2；
+  `KICK_POWER_SET_PLAY_FORWARD` 5.5→5.0；`KICK_POWER_CAP` 8.5→8.0。
+- `src/player.py::attack`：ball_out 判据改为 `|y| > width/2+0.15` 或 `|x| > length/2+0.15`
+  （官方出界线 + 0.15 余量），注释记录 iteration-15 的 32.9s game_stuck 教训。
+- `src/main.py::_act_stopped`：vacate 仅对 `d_ball < RESTART_AVOID_RADIUS_M+0.15` 的机器人，
+  目标改为 `_away_from_ball_point(..., 1.8m)`（短距离撤离）。
+- `src/main.py::_act_opp_set_play`：顶部增加 `g.stopped` 兜底全员 `stop()`。
+
+### v1.10（headless-04 验证，待填）
+- `src/param.py`：`STOP_GRACE_MOVE_S` 0.3→0.0（完全取消摆球期移动，消灭 M-02 侧风险；
+  靠 v1.10 的 line_hold 预先远离重启点来避免 R-06/R-07）。
+- `src/player.py::attack`：新增「贴边线/底线 0.7m 带内保持 1.8m 距离」分支
+  （`action="attack:line_hold"`，朝己方门方向退，clamp 场内 1.0m 余量）。
+  根因：headless-03 我方 2 张罚单都是球滚向角落时贴太近，出界后摆球点就在脚下。
+- 目的：同时压低 R-06/defender_touched_before_kick 与 M-02 stopped_motion。
+
+### headless-04（v1.10）
+- （待填）
+
+### headless-04（v1.10 验证，1:1 平）
+- 代码：v1.10 = 摆球期移动完全取消（`STOP_GRACE_MOVE_S` 0.3→0.0）+ `attack()` 新增
+  「贴边线/底线 0.7m 带内保持 1.8m 距离」分支（`attack:line_hold`）。
+- 构建：离线 build 832322B，sha256 `d9a771a7afc17f7fb80debe51be9006e9519cb2d9895d0172d004084370a100c`。
+- 结果：**1 : 1 平**，duration 479.8s（≈1.25x），176 事件（归档时监控只抓到部分为 199/实际 176）。
+- 罚单：我方 1（robot3 `inactiveRobot`，+249.1s，验收测量 inactiveDuration=72.0ms 异常地 < 阈值
+  10000ms，疑裁判 headless 侧测量瑕疵；ballDistance=1.76m），对方 0。
+- 关键问题（v1.11 修复）：
+  1. **3 次 `goal_disallowed_indirect`**（+146.4 / +200.6 / +359.9s，均 actor=home，reason=
+     `indirect_goal_requirement_not_satisfied`）→ 我方界外球/球门球/间接任意球第一脚直接长传
+     进门不算（需二次触球）。v1.11 改为短传给最近队友，由队友完成第二次触球。
+  2. **开局 34.3s `global_game_stuck`**（最后触球约 +4.3s）→ v1.10 的 line_hold 在球贴线时
+     让所有机器人保持距离，球不再被触碰 → 30s 无触球坠球。v1.11 给 line_hold 加 6s 上限，
+     超时改为「从场内一侧接近 + 向场中心解围」。
+- 归档：docs/kb/logs/headless-04.json、headless-04-runner/、headless-04-summary.txt。
+
+## v1.11 改动清单（2026-11-19 深夜，针对 headless-04 的两个问题）
+- `src/param.py` 新增：`KICK_POWER_SET_PLAY_PASS=4.0`（需二次触球的定位球第一脚短传力度）、
+  `LINE_HOLD_MAX_S=6.0`（line_hold 上限）、`KICK_POWER_LINE_CLEAR=4.5`（贴边线活球向场内解围力度）。
+- `src/player.py`：
+  - `Player.__init__` 增加 `_line_hold_since`。
+  - `attack()` 贴边线分支：6s 内保持 1.8m 距离（防出界后在摆球点旁吃 R-06/R-07）；超时后
+    `action="attack:line_clear"`，从场内一侧接近球并把球往场中心方向解围（避免 30s 僵局）。
+  - 非贴边线/球出界时清空 `_line_hold_since`。
+- `src/main.py::_set_play_kick_plan`：签名加 `taker_id`；界外球/球门球/间接任意球改为
+  「短传给距球最近且非主罚的队友」（力度 `KICK_POWER_SET_PLAY_PASS`），无队友时退化为前推；
+  角球/直接任意球/点球保持直接射门。
+- `tools/headless_match.py`：`start_runner` 前置清理 `/tmp/booster_agent*`；`/match/start` 后
+  等比赛真正 active/playing 再启动 monitor（避免读到上一场 finished 状态提前归档）。
+- 构建：833064B，sha256 `5be54457a8965ecaa54f5d37761e1a942afc3e269bf32d3b354e9b04df825fb8`。
+
+### headless-05（v1.11，0:2 负）分析
+- 代码：v1.11 = 需二次触球的定位球改为短传给队友（`KICK_POWER_SET_PLAY_PASS=4.0`）
+  + `line_hold` 加 6s 上限、超时转 `line_clear` 试图解围。
+- 构建：833064B，sha256 `5be54457a8965ecaa54f5d37761e1a942afc3e269bf32d3b354e9b04df825fb8`。
+- 结果：**0 : 2 负**，wall 451.4s，触球 25，0 罚单。
+- 根因：`line_clear` 的接近点是 `_behind_ball`（球后方），该点被 clamp 回场内后机器人永远
+  达不到「球后方」条件；球停在 (7.13, 1.9)（贴对方底线、仍在场内）无人触碰 → 连续 4 次
+  30.05s 无触球触发 `global_game_stuck` → dropped ball → 循环。
+- 归档：docs/kb/logs/headless-05.json、headless-05-runner/。
+
+### v1.12 改动清单（去掉活球远离球的所有启发式）
+- `src/player.py::attack`：删除 line_hold / line_clear 整段（含 `_line_hold_since`、`LINE_HOLD_MAX_S`）；
+  改为只在 kick 判定处处理贴线球：`abs(ball.x) > half_l - 1.0 or abs(ball.y) > half_w - 1.0`
+  → `action="attack:line_clear"`，朝场中心 `kick(angle_to(ball, center), KICK_POWER_LINE_CLEAR=4.5)`。
+- 教训（h04/h05 各踩一次）：任何「活球时保持距离/绕到球后」的启发式，只要让机器人实际上
+  不触球，就会 30s 无触球吃 `global_game_stuck`；球在场内就必须有人去触球，规则风险只在
+  重启瞬间处理。
+- 构建：832439B，sha256 `8604a99646363bf57968d7750d67669572bbcf0584f86a656cbecfdb125fd274`。
+
+### headless-06（v1.12，2:4 负）分析
+- 结果：**2 : 4 负**，wall 471.7s，0 罚单，0 次 game_stuck，触球 46（home 23）。
+- 1 次 `goal_disallowed_kickoff`（+148.3s，actor=home）→ 我方开球仍直接射门（G-05 无效）。
+- 归档：docs/kb/logs/headless-06.json、headless-06-runner/。
+
+### v1.13 改动清单（开球第一脚不再射门）
+- `src/main.py::_act_our_kickoff`：主罚不再 `kick(0.0, ...)` 直射；选距球最近队友，第一脚
+  传给队友（`KICK_POWER_OUR_KICKOFF_PASS=4.2`），由队友完成第二次触球后再进攻；
+  无队友时向己方半场侧向轻推（远离对方门，避免直射无效）。
+- 构建 sha256 `e183e69c3cbdd36b08e6a273f8b60d7e50a7b3bdfd9fa867a3de77c5f71bcf92`。
+
+### headless-07（v1.13，0:1 负）分析
+- 结果：**0 : 1 负**，wall 481.5s，触球 55，2 次 game_stuck（+114.0/+598.3），0 次 disallowed。
+- 我方 1 罚：`defender_touched_before_kick`（+14.4s，对方 throwIn → 快发时我方 robot1 仍在
+  1.45m 内）。→ v1.14 加大出界后撤退距离。
+- 归档：docs/kb/logs/headless-07.json、headless-07-runner/。
+
+### v1.14 改动清单
+- `src/player.py::attack` 球出界分支：撤退目标由 `0.35*ball` 计算并强制距球 ≥2.4m
+  （原来只到 1.5-2m），降低对方快发界外球时被罚 R-06/R-07 的概率。
+- headless-08 验证：**3:2 胜、0 我方罚单、0 stuck、0 disallowed、touch 73**（headless 循环中当前最佳：进攻与合规同时改善）。
+- 构建：832945B，sha256 `7168f2462ab50d59b59bb64ea999533dcfa959ec707d29c00d878d015c01ad12`。
+
+## headless 快循环验证记录（v1.9 → v1.14）
+
+> 明细见 docs/kb/headless.md「5. 实验结果」；此处只记结论级一句话。
+
+| tag | 版本 | 比分(我:对) | 结果 | wall(s) | stuck | disallowed | touch | 我方罚 |
+|---|---|---|---|---|---|---|---|---|
+| headless-03 | v1.9 | 4 : 0 | 胜 | 481.8 | 0 | 1 | 51 | 2 |
+| headless-04 | v1.10 | 1 : 1 | 平 | 391.3 | 2 | 3 | 39 | 1 |
+| headless-05 | v1.11 | 0 : 2 | 负 | 451.4 | 4 | 0 | 25 | 0 |
+| headless-06 | v1.12 | 2 : 4 | 负 | 471.7 | 0 | 1 | 46 | 0 |
+| headless-07 | v1.13 | 0 : 1 | 负 | 481.5 | 2 | 0 | 55 | 1 |
+| headless-08 | v1.14 | 3 : 2 | **胜** | 481.5 | 0 | 0 | 73 | 0 |
