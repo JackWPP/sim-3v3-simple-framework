@@ -232,7 +232,8 @@ class Player:
     def plan_kick(self) -> tuple[float, float] | None:
         """计算踢球方向和力度。
 
-        从当前球位踢向对方球门中心,力度 2.0。
+        从当前球位踢向对方球门中心;力度随距门距离线性增长(门前轻推、远射加力),
+        后场解围仍用 ``KICK_POWER_BACKFIELD``。
         返回 ``(kick_direction, kick_power)``;球或上下文不可用时返回 None。
         """
         ctx = self.context
@@ -242,11 +243,16 @@ class Player:
 
         kick_target = opponent_goal(ctx)
         kick_direction = angle_to(ball.x, ball.y, *kick_target)
+        distance_to_goal = math.hypot(kick_target[0] - ball.x, kick_target[1] - ball.y)
+        if self._in_backfield():
+            kick_power = KICK_POWER_BACKFIELD
+        else:
+            kick_power = clamp(
+                KICK_POWER_BASE + KICK_POWER_PER_M * distance_to_goal,
+                KICK_POWER_BASE,
+                KICK_POWER_CAP,
+            )
         kick_target = self._goal_target_for_direction(kick_direction)
-        kick_power = (
-            KICK_POWER_BACKFIELD if self._in_backfield()
-            else KICK_POWER_DEFAULT
-        )
 
         self._draw_kick_target(kick_target)
         return kick_direction, kick_power
@@ -329,6 +335,11 @@ class Player:
     # 慢操作（同步接口异步调取，使得不阻塞）
     # ------------------------------------------------------------------
 
+    @property
+    def is_getting_up(self) -> bool:
+        """起身是否已排队或仍在 SDK 中执行。"""
+        return self._backend is not None and self._backend.is_getting_up
+
     def request_mode(self, mode: str) -> None:
         if self._backend is None:
             _log.debug("player %d request_mode -> %s (no backend)", self.id, mode)
@@ -348,8 +359,11 @@ class Player:
     def ensure_ready(self) -> bool:
         """活性自理:摔倒→起身,非 walk→切模式(都异步、不产生移动)。
 
-        返回本帧是否可执行动作(True=已就绪)。
+        返回本帧是否可执行动作(True=已就绪)。起身任务未返回终态前不能切模式,
+        否则 set_mode 会打断/顶掉起身。
         """
+        if self.is_getting_up:
+            return False
         if self.is_fallen:
             self.get_up()
             return False
@@ -742,6 +756,31 @@ class Player:
         along = min(SUPPORT_DIST_M, d)
         tx = bx + ux * along
         ty = by + uy * along
+
+        # 与更靠前的队友(通常是我方进攻者)保持横向分离,避免三台挤在一点被撞倒。
+        # 只在本球员比该队友更靠后时生效,且只沿 y 方向让开,不改纵深。
+        # 注意:context.teammates 的 key 才是机器人 id,RobotState 本身没有 .id 属性
+        # (iteration-13 曾因此每 tick AttributeError 导致全员冻结 0:4)。
+        if self.pose is not None and ctx.teammates:
+            d_self = math.hypot(ball.x - self.pose.x, ball.y - self.pose.y)
+            nearest_mate = None
+            nearest_d = None
+            for mate_id, mate in ctx.teammates.items():
+                if mate_id == self.id or mate.pose is None:
+                    continue
+                mate_d = math.hypot(ball.x - mate.pose.x, ball.y - mate.pose.y)
+                if nearest_d is None or mate_d < nearest_d:
+                    nearest_d = mate_d
+                    nearest_mate = mate
+            if (
+                nearest_mate is not None
+                and nearest_d is not None
+                and nearest_d + 0.5 < d_self
+                and math.hypot(tx - nearest_mate.pose.x, ty - nearest_mate.pose.y)
+                < SUPPORT_SEPARATION_M
+            ):
+                side = 1.0 if ty >= nearest_mate.pose.y else -1.0
+                ty = nearest_mate.pose.y + side * SUPPORT_SEPARATION_M
 
         # 不越过己方底线(x >= 门线 + 0.3),横向夹进场内
         half_l = ctx.field.length / 2.0

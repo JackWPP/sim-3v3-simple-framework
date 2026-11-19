@@ -6,8 +6,9 @@ import 本模块——runtime 构造时由 agent 注入,保持 player.py 平台�
 
 SDK 方法名对齐旧代码经过验证的调用。
 
-慢操作(request_mode / get_up)是秒级同步 SDK 调用,放到每 backend 一个 worker
-线程执行,主循环非阻塞。意图队列长度 1(覆盖式):连续请求只保留最后一个。
+慢操作(request_mode / get_up)放到每 backend 一个 worker 线程执行,主循环非阻塞。
+SDK 的 ``get_up`` 返回 TaskHandle,worker 会等它进入终态后才接受下一个慢操作;
+其余情况意图队列长度 1(覆盖式):连续请求只保留最后一个。
 
 mode 由用户经 request_mode 管理(见 docs/new_design.md §5);set_velocity / kick
 只在 ``_mode == "walk"`` 时下发,否则跳过——避免非 walk 模式下 SDK 返回 400 刷屏。
@@ -57,6 +58,7 @@ class RobotBackend:
         self._wake = threading.Event()
         self._worker_stop = threading.Event()
         self._last_get_up_at = 0.0
+        self._getting_up = False   # 已排队、正在启动或正在执行的起身任务都算
         self._worker = threading.Thread(
             target=self._worker_loop,
             name=f"backend_worker_{player_id}",
@@ -103,6 +105,12 @@ class RobotBackend:
     @property
     def fall_down_recoverable(self) -> bool:
         return self._fall_down_recoverable
+
+    @property
+    def is_getting_up(self) -> bool:
+        """起身是否已排队或 SDK 任务是否仍在执行。"""
+        with self._slot_lock:
+            return self._getting_up
 
     # ------------------------------------------------------------------
     # 底盘控制(步骤 1)
@@ -183,6 +191,12 @@ class RobotBackend:
 
     def _enqueue(self, intent: tuple[str, object]) -> None:
         with self._slot_lock:
+            # 起身排队/执行期间不接受任何新意图:既不能覆盖掉槽里的 get_up,
+            # 也不能在 SDK 起身任务未结束时切模式(会报 mode 冲突)。
+            if self._getting_up:
+                return
+            if intent[0] == "get_up":
+                self._getting_up = True
             self._pending = intent   # 覆盖式:只保留最后一个
         self._wake.set()
 
@@ -208,34 +222,37 @@ class RobotBackend:
             elif kind == "get_up":
                 self._exec_get_up()
 
-    def _poll_mode(self) -> None:
+    def _poll_mode(self) -> bool:
         try:
             mode = self._robot.get_mode()
         except Exception as exc:
             _log.debug("player %d get_mode failed: %s", self._player_id, exc)
-            return
+            return False
         if isinstance(mode, str):
             self._mode = mode
             if mode == "walk":
                 self._fall_down_state = "normal"
                 self._fall_down_recoverable = False
+            return True
+        return False
 
-    def _poll_fall_down_state(self) -> None:
+    def _poll_fall_down_state(self) -> bool:
         if self._mode == "walk":
-            return
+            return True
         try:
             fall_down_state = self._robot.get_fall_down_state()
         except Exception as exc:
             _log.debug(
                 "player %d get_fall_down_state failed: %s", self._player_id, exc,
             )
-            return
+            return False
         state_value = getattr(fall_down_state, "state", None)
         recoverable_value = getattr(fall_down_state, "recoverable", False)
         self._fall_down_state = state_value if isinstance(state_value, str) else None
         self._fall_down_recoverable = (
             recoverable_value if isinstance(recoverable_value, bool) else False
         )
+        return isinstance(state_value, str)
 
     def _exec_set_mode(self, mode: str) -> None:
         try:
@@ -248,10 +265,29 @@ class RobotBackend:
 
     def _exec_get_up(self) -> None:
         try:
-            self._robot.get_up()
+            # 排队的请求可能已过期(机器人自己站起来了);执行前立刻重查一次,
+            # 且刷新失败时不要拿旧缓存的状态做判断。
+            if not self._poll_mode() or not self._poll_fall_down_state():
+                return
+            if self._fall_down_state in (None, "normal", "unknown", "getting_up"):
+                return
+            task = self._robot.get_up()
+            while not task.done():
+                if self._worker_stop.is_set():
+                    return   # 起身任务不可取消,只能停止等待
+                task.wait(timeout=0.5)
+            if task.status != "SUCCEEDED":
+                _log.warning(
+                    "player %d get_up ended: status=%s error=%s",
+                    self._player_id, task.status, task.error,
+                )
+                return
             self._mode = None   # 起身后 mode 未知,需重新 request_mode
             self._fall_down_state = None
             self._fall_down_recoverable = False
             _log.info("player %d get_up done", self._player_id)
         except Exception as exc:
             _log.warning("player %d get_up failed: %s", self._player_id, exc)
+        finally:
+            with self._slot_lock:
+                self._getting_up = False

@@ -152,7 +152,10 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
                 p.action = "penalized"     # 罚下:可起身/切模式,但不能移动
                 p.stop()
             elif not ready:
-                p.action = "fallen" if p.is_fallen else "switching_mode"
+                if p.is_getting_up:
+                    p.action = "getting_up"
+                else:
+                    p.action = "fallen" if p.is_fallen else "switching_mode"
             elif p.pose is None:
                 p.action = "no_pose"       # 自己位置未知:不参与分派(下游按 pose 已知处理)
                 p.stop()
@@ -296,13 +299,22 @@ def _set_play_kick_plan(context: Context, set_play: SetPlay, ball) -> tuple[floa
     half_length = context.field.length / 2.0
     if set_play in (SetPlay.CORNER_KICK, SetPlay.DIRECT_FREE_KICK, SetPlay.PENALTY_KICK):
         if set_play == SetPlay.CORNER_KICK:
-            target = (half_length - 1.0, clamp(ball.y * 0.2, -1.0, 1.0))
+            # 角球:传中到门前抢点区,别瞄门线(角度太偏,只会踢出底线送 goalKick)。
+            target = (
+                half_length - SET_PLAY_TARGET_MARGIN_M,
+                clamp(ball.y * 0.15, -0.8, 0.8),
+            )
             power = KICK_POWER_SET_PLAY_FORWARD
         else:
             target = (gx, gy)
             power = KICK_POWER_SET_PLAY_SHOT
     else:
-        target = (half_length, clamp(ball.y * 0.3, -1.5, 1.5))
+        # 界外球/球门球/间接任意球:只往前推进 SET_PLAY_FORWARD_M,不瞄底线。
+        # iteration-12 教训:力度 8.0 + 瞄底线会把球踢出边线/底线,单场 13 次定位球。
+        target = (
+            min(ball.x + SET_PLAY_FORWARD_M, half_length - SET_PLAY_TARGET_MARGIN_M),
+            clamp(ball.y * 0.4, -2.4, 2.4),
+        )
         power = KICK_POWER_SET_PLAY_FORWARD
     return angle_to(ball.x, ball.y, target[0], target[1]), power
 

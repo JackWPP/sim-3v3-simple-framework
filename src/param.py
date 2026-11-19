@@ -19,13 +19,23 @@ KICK_POWER_MAX = 10.0
 
 # 普通比赛踢球力度。
 KICK_POWER_DEFAULT = 5.0
+# 射门力度随距门距离线性增长:power = clamp(BASE + PER_M * 距门距离, BASE, CAP)。
+# 门前轻推避免打飞,远射加大力度;上限 8.5 防止高力度踢球摔倒。
+KICK_POWER_BASE = 4.5
+KICK_POWER_PER_M = 0.5
+KICK_POWER_CAP = 8.5
 KICK_POWER_BACKFIELD = 5.0
 KICK_POWER_OUR_KICKOFF = 5.0
 
 # 定位球:向前场踢出(界外球/球门球/间接任意球)的力度。
-KICK_POWER_SET_PLAY_FORWARD = 8.0
+# iteration-12 实测 8.0 会把球直接踢出边线(单场 8 次 throwIn + 3 次 goalKick),
+# 降到 5.5 只求稳稳推进、把球留在场内。
+KICK_POWER_SET_PLAY_FORWARD = 5.5
 # 定位球:可以直接射门的类型(角球/直接任意球/点球)的射门力度。
-KICK_POWER_SET_PLAY_SHOT = 10.0
+KICK_POWER_SET_PLAY_SHOT = 8.0
+# 我方定位球:向前推进的目标距离(m),以及目标点离边线/底线的安全余量(m)。
+SET_PLAY_FORWARD_M = 4.0
+SET_PLAY_TARGET_MARGIN_M = 1.2
 
 
 # ======================================================================
@@ -35,7 +45,8 @@ KICK_POWER_SET_PLAY_SHOT = 10.0
 ARRIVE_DIST = 0.15             # 到达目标点阈值 (m)
 OMNI_DIST = 1.0                # 距目标小于该值时使用全向近距控制
 TURN_THRESHOLD = 0.5           # 远距离行走时,角差超过该值先原地转向 (rad)
-MAX_LINEAR = 2.0               # 指令前进速度上限 (m/s)
+# iteration-12 实测 2.0 在挤堆时摔倒/碰撞明显,先降到 1.8 观察。
+MAX_LINEAR = 1.8               # 指令前进速度上限 (m/s)
 MAX_ANGULAR = 2.0              # 指令转向速度上限 (rad/s)
 LINEAR_GAIN = 1.5              # 平移 P 增益
 ANGULAR_GAIN = 2.0             # 转向 P 增益
@@ -59,6 +70,7 @@ GUARD_THREAT_ENTER_X = -1.0
 GUARD_THREAT_EXIT_X = -0.7
 
 SUPPORT_DIST_M = 3.5           # 支援点距球距离；必须 >3m,否则会踩 M-05(3m 内 10s 不动)罚下
+SUPPORT_SEPARATION_M = 1.8     # 支援点与更靠前的队友的最小距离,避免三台挤在一点被撞倒
 
 # ======================================================================
 # Normal 阶段策略
