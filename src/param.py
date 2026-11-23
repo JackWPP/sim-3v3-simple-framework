@@ -292,3 +292,13 @@ KICKOFF_SAFE_Y = 2.6
 KICKOFF_DEEP_SAFE_X = -4.0
 KICKOFF_DEEP_SAFE_Y = 2.0
 KICKOFF_BALL_TOWARD_HALF_VX = -0.05
+
+# v2.10:数据缺失(game/ball 为 None)时的防御性慢速巡逻。第 4 场 f751146f
+# 288–305s 出现「三台同时 0 指令、球旁 0.31m 站 10s+」→ inactiveRobot;根因
+# 候选是 context.game/ball 短暂丢失后 play() 走进全员 stop() 分支(或 play 抛
+# 异常被 framework 兜底全员停车)。数据缺失 ≠ 裁判暂停:改为慢速小幅巡逻,
+# 0.12m/s × 2s = 0.24m < M-02 的 0.3m 阈值,同时又足够让平台判为「在动」。
+DATA_LOSS_PATROL_SPEED = 0.12     # m/s;任意 2s 窗口位移 ≤0.24m
+DATA_LOSS_PATROL_STEP_M = 0.6     # 巡逻目标点相对自身的距离
+DATA_LOSS_PATROL_FLIP_S = 2.0     # 换向周期(s)
+DATA_LOSS_APPROACH_M = 1.2        # 距最后已知球位小于该值后转入巡逻

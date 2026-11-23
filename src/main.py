@@ -120,6 +120,11 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         store.normal_attacker = None
         store.normal_keeper = None
         store.set_play_taker = None   # 锁定的定位球主罚球员 id
+        # v2.10:数据缺失防御。last_ball_pose 记住最后已知球位,ball 丢失时
+        # 朝它慢走;data_loss_patrol 记录每台巡逻方向/换向时间,避免全员站死
+        # 吃 inactiveRobot(第 4 场 7 张罚单的根因候选)。
+        store.last_ball_pose = None
+        store.data_loss_patrol = {}
 
     @staticmethod
     def play(context: Context, players: list[Player], store) -> None:
@@ -129,6 +134,11 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
 
         # 画可视化(每帧)
         _analyze_and_draw(context, players, store)
+
+        # v2.10:记住最后已知球位。game/ball 短暂丢失时朝它慢走,不要全员站死。
+        ball_now = context.ball
+        if ball_now is not None:
+            store.last_ball_pose = (ball_now.x, ball_now.y)
 
         # 当前 phase 以 label 画在场外。
         from .framework import debugdraw
@@ -417,6 +427,54 @@ def _ball_speed_mps(context: Context, store) -> float | None:
     return math.hypot(vel[0], vel[1])
 
 
+def _slow_patrol(
+    context: Context, p: Player, store, ball_xy: tuple[float, float] | None,
+) -> None:
+    """v2.10:数据缺失(game/ball 为 None)时的防御性慢速巡逻,替代全员硬停。
+
+    线上第 4 场(f751146f 0:6)288–305s:我方三台机器人同时 0 指令、距球 0.31m
+    的 robot1 站了 10s+ → 3 张 inactiveRobot。按 Lead 指示:数据缺失 ≠ 裁判
+    要求静止。这里用 0.12m/s 小幅巡逻(2s 换向,任意 2s 窗口位移 ≤0.24m,低于
+    M-02 的 0.3m 阈值;球位已知时沿「远离最后球位」的径向走,满足 R-07 的
+    径向远离要求),让平台判定机器人在活动,同时不会在真实 SET 期超阈值移动。
+    """
+    if p.pose is None:
+        p.action = "data_loss:no_pose"
+        p.stop()
+        return
+    state = getattr(store, "data_loss_patrol", None)
+    if state is None:
+        state = {}
+        store.data_loss_patrol = state
+    now = context.now
+    item = state.get(p.id)
+    if item is None:
+        item = [1.0, now + DATA_LOSS_PATROL_FLIP_S]
+        state[p.id] = item
+    sign, next_flip = item[0], item[1]
+    if now >= next_flip:
+        sign = -sign
+        item[0] = sign
+        item[1] = now + DATA_LOSS_PATROL_FLIP_S
+    step = DATA_LOSS_PATROL_STEP_M
+    if ball_xy is not None:
+        dx, dy = p.pose.x - ball_xy[0], p.pose.y - ball_xy[1]
+        norm = math.hypot(dx, dy)
+        if norm > 1e-6:
+            ux, uy = dx / norm, dy / norm
+            tx = p.pose.x + ux * step
+            ty = p.pose.y + uy * step + sign * 0.25
+        else:
+            tx, ty = p.pose.x + sign * step, p.pose.y
+    else:
+        # 无球位参照:沿场地长轴来回小幅移动。
+        tx, ty = p.pose.x + sign * step, p.pose.y
+    p.action = "data_loss:patrol"
+    p.omni_move_toward(
+        _field_point(context, tx, ty, 0.4), speed=DATA_LOSS_PATROL_SPEED,
+    )
+
+
 def _act_normal(context: Context, players: list[Player], store) -> None:
     """NORMAL:距球最近者 attack,剩下人里离己方门最近者 guard,其余 support。
 
@@ -425,11 +483,38 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     if not players:
         return
 
-    # 球不可见(约 1.5s 没更新):不要乱走,原地停住等待球重新出现。
+    # v2.10:球信息丢失(约 1.5s 没更新)不等于全员站死。第 4 场 f751146f
+    # 288–305s 我方三台同时 0 指令、距球 0.31m 的人站 10s+ → 3 张 inactiveRobot。
+    # 这里改为:门将回门前慢速巡逻;其他人朝最后已知球位慢走近(补位/施压),
+    # 到位后转入慢速巡逻,保证「球在 3m 内但一直不动」不会发生。
     if context.ball is None:
+        last = getattr(store, "last_ball_pose", None)
+        keeper_id = getattr(store, "normal_keeper", None)
         for p in players:
-            p.action = "no_ball"
-            p.stop()
+            if p.id == keeper_id:
+                _slow_patrol(context, p, store, last)
+                continue
+            if (
+                last is not None
+                and p.pose is not None
+                and dist(p.pose.x, p.pose.y, last[0], last[1])
+                > DATA_LOSS_APPROACH_M
+            ):
+                p.action = "no_ball:approach"
+                p.omni_move_toward(
+                    _field_point(context, last[0], last[1], 0.4),
+                    speed=DATA_LOSS_PATROL_SPEED,
+                )
+            else:
+                _slow_patrol(context, p, store, last)
+        return
+
+    # v2.10 紧急修复(analyst 2026-11-23 定位):v2.7 的 presser 分支引用了未定义的
+    # 局部变量 ball,导致「球一停(球速<0.2m/s)」时 play() 每帧抛 NameError,
+    # runtime 捕获后对全员 p.stop() → 全队冻结、近球站 10s+ 吃 inactiveRobot
+    # (v2.7 第 3 场 0:6、v2.8 第 4 场 0:6、v2.9 第 5 场 9 张罚单均由此引起)。
+    ball = context.ball
+    if ball is None:  # 理论不可达(上面的 None 分支已 return),防御性收窄类型
         return
 
     # v2.0 协同分工:先固定 1 台门将(离己方门最近),绝不让门将参与抢球;
@@ -563,9 +648,13 @@ def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
         vel is not None and vel[0] < KICKOFF_BALL_TOWARD_HALF_VX
     )
     for idx, p in enumerate(rest):
-        if p.pose is None or ball is None:
+        if p.pose is None:
             p.action = "stay"
             p.stop()
+            continue
+        if ball is None:
+            # v2.10:球信息丢失时不站死,慢速巡逻等球重新出现。
+            _slow_patrol(context, p, store, getattr(store, "last_ball_pose", None))
             continue
         d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
         if d_ball < KICKOFF_STAY_SAFE_DIST_M or ball_toward_half:
@@ -674,6 +763,8 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     set_play = get_set_play_type(context)
 
     if g is not None and g.stopped:
+        # v2.10 审计:这是裁判明确 stopped=True 的摆球期,静止是规则要求;
+        # 与「game/ball 数据缺失」不同,这里必须真停,不能改成慢速巡逻。
         for p in players:
             p.action = "setplay:placement"
             p.stop()
@@ -683,9 +774,11 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
         return
     ball = context.ball
     if ball is None:
+        # v2.10:球信息丢失也不全员站死(旧逻辑 stop() 会在球旁累积
+        # inactiveRobot),改为朝最后已知球位慢速巡逻。
+        last = getattr(store, "last_ball_pose", None)
         for p in players:
-            p.action = "setplay:no_ball"
-            p.stop()
+            _slow_patrol(context, p, store, last)
         return
 
     # 主罚选择:阶段内粘滞避免抖动。
@@ -764,15 +857,18 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
     # 这里再兜底一次,避免 phase 判定竞态造成的摆球期移动。
     g = context.game
     if g is not None and g.stopped:
+        # v2.10 审计:这是裁判明确 stopped=True 的摆球期,静止是规则要求;
+        # 与「game/ball 数据缺失」不同,这里必须真停,不能改成慢速巡逻。
         for p in players:
             p.action = "setplay:placement"
             p.stop()
         return
     ball = context.ball
     if ball is None:
+        # v2.10:同上,数据缺失≠裁判暂停,慢速巡逻避免 inactiveRobot。
+        last = getattr(store, "last_ball_pose", None)
         for p in players:
-            p.action = "opp_setplay:no_ball"
-            p.stop()
+            _slow_patrol(context, p, store, last)
         return
 
     gx, gy = own_goal(context)
@@ -832,9 +928,13 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
     """
     g = context.game
     if g is None:
+        # v2.10:收不到裁判状态 ≠ 裁判要求静止。旧逻辑全员 stop(),一旦
+        # game/ball 数据短暂丢失就三台一起站死(第 4 场 288–305s 的 7 张
+        # inactiveRobot)。只有 game 存在且明确 stopped=True / SET 时才是
+        # 真静止(见下方),这里改为慢速巡逻,避免球旁机器人 10s 不动被罚。
+        last = getattr(store, "last_ball_pose", None)
         for p in players:
-            p.action = "stopped"
-            p.stop()
+            _slow_patrol(context, p, store, last)
         return
 
     if store.prev_phase != Phase.STOPPED:
