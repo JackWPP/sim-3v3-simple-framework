@@ -824,7 +824,12 @@ class Player:
             return
 
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
-        self._kicking = d <= (KICK_EXIT_M if self._kicking else KICK_ENTER_M)
+        # v2.22(analyst 第16场): 只在贴近球(<=0.55m)时进入 kick 任务;此前
+        # 2.0m 就交给后端 kick 任务,实测接近速度仅 0.4-0.5m/s → 抢不到静止球。
+        if not self._kicking and d <= KICK_CONTACT_RANGE_M:
+            self._kicking = True
+        elif self._kicking and d > KICK_CONTACT_RANGE_M + 0.25:
+            self._kicking = False
         if self._kicking:
             half_l = self.context.field.length / 2.0
             half_w = self.context.field.width / 2.0
@@ -904,9 +909,14 @@ class Player:
                     avoid_robots=True,
                 )
                 return
-            behind = _behind_ball(ball.x, ball.y, kick_target, CHASE_BEHIND_M)
-            behind = (min(behind[0], half_l - 0.5), behind[1])
-            self.walk_to(behind)
+            # v2.22(analyst 第16场): 远距追击改全向平移直冲球(不转身),到达
+            # <=KICK_CONTACT_RANGE_M 后下一帧自动进 kick 分支。原先 walk_to 到
+            # 球后侧需要先转身(约1.6s/180°),抢静止球连 1.5-4.5s 都抢不下。
+            self.action = "attack:omni_chase"
+            self.omni_move_toward(
+                (ball.x, ball.y), speed=ATTACK_APPROACH_SPEED_MPS
+            )
+            return
 
     def guard(self) -> None:
         """守门:封角度站位 + 门前解围。
@@ -1043,6 +1053,7 @@ class Player:
             if (
                 d_ball < KEEPER_CLEAR_RADIUS_M
                 and ball.x >= self.pose.x - 0.05
+                and ball.x < 0.0  # v2.22(Lead): 只对己方半场的球出击,其余回线站位
                 and ball_speed < KEEPER_CLEAR_MAX_BALL_SPEED_MPS
             ):
                 # v2.7:解围方向固定朝对方半场(禁止朝己方门);仍带 y 校准,
@@ -1051,8 +1062,11 @@ class Player:
                     ball.x, ball.y, half_l * 0.6, clamp(ball.y * 0.3, -2.0, 2.0)
                 )
                 self.action = "guard:clear"
-                self._clear_kick_started = ctx.now
-                self._clear_ball_xy = (ball.x, ball.y)
+                # v2.22:只在首次进入解围时记时间戳;旧版每帧重置导致
+                # "出击0.8s未触球自恢复"永远不触发(死代码)。
+                if self._clear_kick_started is None:
+                    self._clear_kick_started = ctx.now
+                    self._clear_ball_xy = (ball.x, ball.y)
                 self.kick(clear_dir, KEEPER_CLEAR_POWER)
                 return
 
@@ -1068,11 +1082,17 @@ class Player:
             dy = GUARD_SHUFFLE_DIST_M if shuffle == 0 else -GUARD_SHUFFLE_DIST_M
             home = (home[0], clamp(home[1] + dy, -3.6, 3.6))
 
-        self.action = "guard:home"
         debugdraw.point(
             home[0], home[1], rgb=(0.0, 0.6, 1.0), scale=0.2, ns="guard_home",
         )
-        self.walk_to(home, face=face, avoid_ball=False, avoid_robots=True)
+        # v2.22(analyst 第16场): 横移用全向平移(不转身),|dy|>0.15 才发指令;
+        # 门将横移被 walk_to 的"先转身"吃掉是第16场 5 失球的直接原因。
+        if abs(home[1] - self.pose.y) > 0.15:
+            self.action = "guard:omni_home"
+            self.omni_move_toward(home, speed=GUARD_OMNI_SPEED_MPS)
+        else:
+            self.action = "guard:home"
+            self.walk_to(home, face=face, avoid_ball=False, avoid_robots=True)
 
     def support(self, primary_pose: tuple[float, float] | None = None) -> None:
         """协同支援(v2.0):按进攻/防守两种形态跑位,不再和持球人挤球。

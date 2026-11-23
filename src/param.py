@@ -310,6 +310,12 @@ KEEPER_CLEAR_MAX_BALL_SPEED_MPS = 0.6
 # 球贴边线/门线时该点落在场外,后端绕不过去→反复起停(第15场3个失球同根)。
 # kick 前校验后侧点是否在场内(留 0.15m 余量),出界则按角度步进旋向场内候选方向。
 KICK_BEHIND_OFFSET_M = 0.45
+# v2.22(analyst 第16场): 执行层提速——kick 任务只在贴近球时启动,远距用全向平移直冲。
+# 第16场实测:2.0m 就把走位交给后端 kick 任务,接近速度仅 0.4-0.5m/s,
+# 全队"纯旋转"137.5s(playing 29%),是 5 失球/射门0正的执行主因。
+KICK_CONTACT_RANGE_M = 0.55
+ATTACK_APPROACH_SPEED_MPS = 1.8
+GUARD_OMNI_SPEED_MPS = 1.6
 KICK_BEHIND_MARGIN_M = 0.15
 
 # v2.2:对方定位球摆球期间的撤离节奏。
