@@ -181,7 +181,7 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
             _act_our_kickoff(context, active, store)
         elif phase == Phase.OPP_KICKOFF:
             _clear_normal_sticky(store)
-            _act_opp_kickoff(context, active)
+            _act_opp_kickoff(context, active, store)
         elif phase == Phase.OUR_SET_PLAY:
             _clear_normal_sticky(store)
             _act_our_set_play(context, active, store)
@@ -526,6 +526,8 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     # v2.5:门将粘滞。线上 v2.4(0:5)复盘发现门将角色在两台深位机器人之间反复
     # 切换,两人都往门前挤/互相推挤,导致门线出现空档。这里保留上一帧门将,除非
     # 它已明显离门更远(>1.5m)。
+    # v2.11:本段在 v2.5 引入时漏了 store 形参(调用处也没传),导致每次
+    # OPP_KICKOFF 每帧抛 NameError → runtime 全员 stop;analyst 用回放自检抓到。
     prev_keeper_id = getattr(store, "normal_keeper", None)
     if prev_keeper_id is not None:
         prev_keeper = next((p for p in players if p.id == prev_keeper_id), None)
@@ -694,7 +696,9 @@ def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
             p.stop()
 
 
-def _act_opp_kickoff(context: Context, players: list[Player]) -> None:
+def _act_opp_kickoff(
+    context: Context, players: list[Player], store,
+) -> None:
     """对方开球:门将守门,其余人站本方半场、中圈外、距球 >3m 的等待点。
 
     规则:开球不触发自由球避让(is_free_kick 不含 kickOff),但非开球方
@@ -708,6 +712,8 @@ def _act_opp_kickoff(context: Context, players: list[Player]) -> None:
     # v2.5:门将粘滞。线上 v2.4(0:5)复盘发现门将角色在两台深位机器人之间反复
     # 切换,两人都往门前挤/互相推挤,导致门线出现空档。这里保留上一帧门将,除非
     # 它已明显离门更远(>1.5m)。
+    # v2.11:本段在 v2.5 引入时漏了 store 形参(调用处也没传),导致每次
+    # OPP_KICKOFF 每帧抛 NameError → runtime 全员 stop;analyst 用回放自检抓到。
     prev_keeper_id = getattr(store, "normal_keeper", None)
     if prev_keeper_id is not None:
         prev_keeper = next((p for p in players if p.id == prev_keeper_id), None)
