@@ -50,6 +50,7 @@
 | 36 | 2026-11-24 05:46 | v3.1 (ver35) | 123213 | 1242 | **0:2 负** | 5 | 2 | 失球 sim208.63/563.59，对方另 1 球被吹 indirect（118.03）；我方 5 罚=**4×stopped_motion**（robot2@36.27/88.38/190.55、robot3@686.81，distanceMoved 0.305–0.317m、duration 1.8–2.05s）+ fallenRobot robot3@265.54；对方 2 罚（inactive/illegalPosition）；retake 1；R-06/R-07=0；home avg_pair 4.71m、min_pair 7.6%、two 6.4%、avg_nearest 2.61m、ball_in_home_half **63.2%**；oob 17/11；72 段 sha 72/72、6229 帧、711.7s；rating 1035→1027（−8），对方 1265→1285（+20）；counted=true | v3.1 小样本 1/3：R-06/R-07 归零 ✓ 但 vacate 1.2m/s 硬停残余 0.31m 跨 0.3m 阈值 → 4×stopped_motion；改 v3.1b（vacate 速度 1.2→0.8，残余 ~0.13m） | 待 analyst | **有效** |
 | 37 | 2026-11-24 06:12 | v3.1b (ver36) | 句号 | 1166 | **0:3 负** | 1 | 1 | 失球 sim184.18/423.86/463.88，对方另 2 球被吹 indirect（327.72/356.21）；我方 1 罚 stopped_motion robot3@319.51（0.3055m/1.98s，仍边际超阈）；对方 1 罚 fallenRobot；retake 0；R-06/R-07=0；home avg_pair 4.73m、min_pair 14.7%、two 10.8%、avg_nearest 2.56m、ball_in_home_half **52.9%**；oob 21/17；75 段 sha 75/75、6629 帧、748.3s；rating 1027→1015（−12），对方 1166→1191（+25）；counted=true | v3.1b 小样本 1/3：R-06/R-07=0 ✓、ball 半场 52.9%<60 ✓、罚单 1≤1 ✓；但进球 0 ✗、失球 3>2 ✗ → 单场不达标；stopped_motion 仍 1 张边际（0.3055m） | 待 analyst | **有效** |
 | 38 | 2026-11-24 06:27 | v3.1b (ver36) | omo | 1096 | **0:1 负** | 5 | 1 | 失球 sim247.05；我方 5 罚=**4×stopped_motion**（robot2@36.41、robot2@663.69、robot1@663.84、robot1@740.11，distanceMoved 0.304–0.326m）+ **R-06 defender_set_play_interference robot2@218.79**；对方 1 罚 R-06；retake 4；home avg_pair 4.75m、min_pair 13.2%、two 8.8%、avg_nearest 2.47m、ball_in_home_half **58.4%**；oob 27/21；78 段 sha 78/78、6807 帧、772.4s；rating 1015→1001（−14），对方 1096→1118（+22）；counted=true | v3.1b 小样本 2/3：R-06 复发（1）+ 4×M-02 边际 → v3.1b 相对 v3.0 是**罚单回归**（v3.0 场 0–1 罚）；ball 58.4%<60 ✓ | 待 analyst | **有效** |
+| 39 | 2026-11-24 06:42 | v3.1b (ver36) | Messi | 1091 | **1:0 胜** | 3 | 4 | 我方进球 sim587.42、0 失球；我方 3 罚全 stopped_motion（robot2@99.64/158.21、robot1@269.31，0.304–0.339m 边际）；对方 4 罚（inactive/fallenRobot/2×illegalPosition）；retake 3；home avg_pair 5.71m、min_pair 8.5%、two 6.8%、avg_nearest 2.42m、ball_in_home_half **5.1%**；oob 9/5；67 段 sha 67/67、5721 帧、665.8s；rating 1001→1022（+21），对方 1091→1014（−77）；counted=true | v3.1b 小样本 3/3：1:0 胜；但 3×M-02 边际仍在 → v3.1b 结论=罚单回归，不保留 | 待 analyst | **有效** |
 
 
 ## 有效局里程碑：10/10 达成（2026-11-23 22:13）
@@ -126,3 +127,14 @@ v2.7 `_act_normal` presser 分支裸 `ball`），两次都被 framework `runtime
 
 结论：v3.0（restore v2.16 + 2 patches）明显优于 v2.26/v2.27 —— 首个胜场（3:0）、rating 净 +19、失球 4→2/3 场、球半场最低 58.5%；R-06 仅 1 次（#33 defender_set_play_interference）。**建议 v3.0 作为新基线继续打**（Lead m03523 Plan B 的「≥2 场不输」条件满足）。
 遗留：①#33 R-06 仍偶发（defender_set_play_interference，robot3 在对方摆球期触球）；②#34 回放缺失需查平台；③ball 半场仍 58.5–66.7%，进攻/中场控制待提升。
+
+### v3.1 / v3.1b 小样本小结（2026-11-24）
+
+| 版本 | 场次 | 战绩 | 我方罚单 | R-06/R-07 | ball 半场 | rating |
+|---|---|---|---|---|---|---|
+| v3.1 | #36 | 0:2 负 | 5（4 M-02 边际+1 fallen） | 0/0 | 63.2% | 1035→1027 |
+| v3.1b | #37 | 0:3 负 | 1（M-02 边际） | 0/0 | 52.9% | 1027→1015 |
+| v3.1b | #38 | 0:1 负 | 5（4 M-02 边际+R-06） | 1/0 | 58.4% | 1015→1001 |
+| v3.1b | #39 | **1:0 胜** | 3（M-02 边际） | 0/0 | 5.1% | 1001→1022 |
+
+结论：v3.1/v3.1b 的「摆球期移动」方向被数据否决——1.3s@0.8m/s 撤位跨 grace 必带 M-02 边际（0.304–0.339m），R-06 仍偶发；回 v3.0 基线，另起 v3.2 = v3.0 + P0-1 出界预判撤位 + P1 贴线 taker 修复 - 摆球期全部移动（全停）。
