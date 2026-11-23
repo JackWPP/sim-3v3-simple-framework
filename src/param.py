@@ -232,3 +232,19 @@ SUPPORT_OFFENSE_X = 2.5
 SUPPORT_MIN_BALL_SAFE_M = 3.15
 # 射门收敛:瞄得更靠门内(0.45),上限力度 7.5,减少打飞/打偏出底线。
 SHOOT_POWER_MAX = 7.5     # 射门力度上限(降低打飞出底线概率)
+
+# v2.2:门将出击解围 + 关键站位修正
+# 线上 v2.1 首战 0:1(阿白):门将 walk_to 带了 avoid_ball=True,当球滚到门前
+# (门将目标≈球位置)时避球力把门将往反方向推,球从门线横穿时门将反而后退。
+KEEPER_CLEAR_RADIUS_M = 1.35   # 球进入该半径内门将直接踢走(解围)
+KEEPER_CLEAR_POWER = 6.0       # 解围力度
+KEEPER_DEEP_BALL_X = -5.0      # 球比这更深时门将贴门线站位
+KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
+
+# v2.2:对方定位球摆球期间的撤离节奏。
+# 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
+# 因此:先快撤(1.2s 内),之后若还没到安全距离,以 0.12m/s(低于 0.15 漂移阈值)
+# 慢慢爬出 1.45m 风险圈,既不吃 M-02 也能满足 R-07。
+STOP_VACATE_WINDOW_S = 1.2
+STOP_VACATE_SPEED = 2.0
+STOP_CRAWL_SPEED = 0.12

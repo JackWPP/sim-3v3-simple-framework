@@ -791,36 +791,44 @@ class Player:
             self.walk_to(behind)
 
     def guard(self) -> None:
-        """守门:站小禁区中央待命
+        """守门:封角度站位 + 门前解围。
 
-        无 pose(未就位)时退回站小禁区中央。
+        线上 v2.1 首战暴露两个问题(0:1):
+        1) walk_to(avoid_ball=True) 会把门将从自家门前推开——球滚到门口时门将
+           目标点≈球位置,避球力把门将往反方向推,球横穿门线时门将反而后退。
+        2) 球贴门线时门将不出击,只站着看球进门。
+
+        v2.2:门将不避球(avoid_ball=False);球进入 KEEPER_CLEAR_RADIUS_M 且在
+        开放球权(PLAYING/未 stopped/无定位球)时直接踢走解围;球更深时贴门线站位。
         """
-        home = own_goal_area_center(self.context) if self.context is not None else None
+        ctx = self.context
+        home = own_goal_area_center(ctx) if ctx is not None else None
         if home is None or self.pose is None:
             self.action = "guard:stop"
             self.stop()
             return
 
-        ball = self.context.ball if self.context is not None else None
-        ctx = self.context
+        ball = ctx.ball
         half_l = ctx.field.length / 2.0
+        game = ctx.game
+        open_play = (
+            game is not None
+            and getattr(game, "state", None) is not None
+            and getattr(game.state, "name", "") == "PLAYING"
+            and not getattr(game, "stopped", False)
+            and (getattr(game, "set_play", None) is None or game.set_play == SetPlay.NONE)
+        )
 
-        # 站位:回到小禁区中央(门线内侧 0.5m)。iteration-05 曾改成「门中心→球 射线
-        # 距离 1.0m」并加门将出击(sweep),但那版引用了未定义常量导致 agent 每帧崩溃;
-        # 崩溃修复后这两项改动未经验证,先回退到最稳的基线站位,等有干净的 baseline 再
-        # 逐步验证(见 docs/kb/iterations.md 的教训段)。
-        home = own_goal_area_center(ctx)
-
-        # 门线横移(v2.1):把球 y 投影到门线封射门角度。
-        # 线上 v2.0 3:3 复盘:三个失球都是球横穿门线时门将 y 仍停在旧值
-        # (旧版只按 ball.y*0.65 跟随,折射/横传后差 1.4-1.6m)。改为:
-        # - 球在己方半场(x<0)时按 ball.y 直接跟随(0.9 倍),站位推到门线内侧;
-        # - 球在对方半场时保持保守跟随,避免被远射吊射。
+        # 门线横移(v2.2):球在己方半场时按 ball.y*0.9 跟随并贴门线站位;
+        # 球在对方半场时保守跟随。球比 KEEPER_DEEP_BALL_X 更深时进一步贴线。
         if ball is not None:
             if ball.x < 0.0:
                 cover_gain = KEEPER_TRACK_GAIN_OWN_HALF
                 cover_lim = KEEPER_TRACK_Y_LIMIT_OWN
-                home = (-(half_l - KEEPER_LINE_INSET_M), home[1])
+                inset = KEEPER_LINE_INSET_M
+                if ball.x < KEEPER_DEEP_BALL_X:
+                    inset = KEEPER_DEEP_INSET_M
+                home = (-(half_l - inset), home[1])
             else:
                 cover_gain = KEEPER_TRACK_GAIN_FAR
                 cover_lim = KEEPER_TRACK_Y_LIMIT_FAR
@@ -830,18 +838,24 @@ class Player:
         # 待命朝向:朝球(便于快速反应);球不可见则朝对方门方向(默认 0)。
         face = 0.0
         if GUARD_FACE_BALL and ball is not None:
-            face = angle_to(
-                self.pose.x, self.pose.y, ball.x, ball.y,
-            )
+            face = angle_to(self.pose.x, self.pose.y, ball.x, ball.y)
 
-        # 防 M-05:球就在待命点附近且长时间停滞时,小幅左右移动保持"活动"。
-        # (裁判按 3m 内 10s 几乎不动判罚;这里用 2.5s 周期的 ±0.35m 摆动。)
-        game = ctx.game if ctx is not None else None
+        # 门前解围(v2.2):球在解围半径内且开放球权 → 直接踢走,避免被补射/乌龙。
+        if ball is not None and open_play:
+            d_ball = dist(self.pose.x, self.pose.y, ball.x, ball.y)
+            if d_ball < KEEPER_CLEAR_RADIUS_M:
+                clear_dir = angle_to(ball.x, ball.y, 1.5, clamp(ball.y * 0.5, -2.0, 2.0))
+                self.action = "guard:clear"
+                self.kick(clear_dir, KEEPER_CLEAR_POWER)
+                return
+
+        # 防 M-05:球在待命点附近但还没到解围半径时,小幅摆动保持"活动"。
         if (
             ball is not None
-            and ctx is not None
             and (game is None or not game.stopped)
-            and dist(ball.x, ball.y, home[0], home[1]) < GUARD_INACTIVE_BALL_DIST_M
+            and KEEPER_CLEAR_RADIUS_M + 0.4
+            < dist(ball.x, ball.y, home[0], home[1])
+            < GUARD_INACTIVE_BALL_DIST_M
         ):
             shuffle = int(ctx.now / GUARD_SHUFFLE_PERIOD_S) % 2
             dy = GUARD_SHUFFLE_DIST_M if shuffle == 0 else -GUARD_SHUFFLE_DIST_M
@@ -851,7 +865,7 @@ class Player:
         debugdraw.point(
             home[0], home[1], rgb=(0.0, 0.6, 1.0), scale=0.2, ns="guard_home",
         )
-        self.walk_to(home, face=face, avoid_ball=True, avoid_robots=True)
+        self.walk_to(home, face=face, avoid_ball=False, avoid_robots=True)
 
     def support(self, primary_pose: tuple[float, float] | None = None) -> None:
         """协同支援(v2.0):按进攻/防守两种形态跑位,不再和持球人挤球。

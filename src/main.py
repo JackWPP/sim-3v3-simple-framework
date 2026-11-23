@@ -639,10 +639,11 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
 def _act_stopped(context: Context, players: list[Player], store) -> None:
     """STOPPED:SET/摆球等必须静止的阶段。
 
-    唯一例外是对方定位球的摆球阶段:裁判给了 1.5s 刹车宽限期(MUST_STOP_GRACE_MS),
-    宽限期内把仍离球太近的机器人全向撤离,避免主罚触球瞬间距球 <1.45m 吃 R-07
-    (iteration-02 因此吃了 3 张罚单)。宽限期一过立刻全员停止;我方定位球摆球时
-    不移动(主罚放开后会自己走近);SET(准备)阶段一律静止(motion_in_set)。
+    例外是对方定位球的摆球阶段:裁判给 1.5s 刹车宽限期,宽限内必须把仍贴近球的
+    机器人撤出 1.45m 风险圈,否则主罚触球瞬间吃 R-07(v2.1 线上 0:1 就因此丢球+罚下)。
+    宽限之后若还没撤到安全距离,以 STOP_CRAWL_SPEED(0.12m/s,低于裁判 0.15m/s
+    漂移阈值)慢慢爬出——2s 窗口位移 0.24m < 0.3m,不吃 M-02。
+    我方定位球摆球时不移动;SET 阶段一律静止。
     """
     g = context.game
     if g is None:
@@ -651,9 +652,9 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
             p.stop()
         return
 
-    # 记录进入 STOPPED 的时刻(每段 stopped 只撤离一次)。
     if store.prev_phase != Phase.STOPPED:
         store.stopped_since = context.now
+    elapsed = context.now - getattr(store, "stopped_since", context.now)
 
     our_team = context.team_id
     defending_restart = (
@@ -664,24 +665,21 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
         and int(g.kicking_team) != int(KICKING_TEAM_NONE)
         and int(g.kicking_team) != int(our_team)
     )
-    grace_left = STOP_GRACE_MOVE_S - (
-        context.now - getattr(store, "stopped_since", context.now)
-    )
-    can_vacate = defending_restart and grace_left > 0.0
     ball = context.ball
 
     for p in players:
-        if can_vacate and ball is not None and p.pose is not None:
+        if defending_restart and ball is not None and p.pose is not None:
             d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
-            # 只撤离真正踩在 R-07 风险圈里的机器人:距离越远、动作越多越容易
-            # 在 grace 之后还继续动而吃 M-02(stopped_motion)。目标只放到 1.8m,
-            # 保证 0.3s 宽限内走完,同时避开 1.45m 判定线。
-            if d_ball < RESTART_AVOID_RADIUS_M + 0.15:
+            if d_ball < RESTART_AVOID_RADIUS_M + 0.35:
                 target = _away_from_ball_point(
-                    context, ball, p.pose, RESTART_AVOID_RADIUS_M + 0.35
+                    context, ball, p.pose, RESTART_AVOID_RADIUS_M + 0.55
                 )
-                p.action = "stopped:vacate"
-                p.omni_move_toward(target)
+                if elapsed <= STOP_VACATE_WINDOW_S:
+                    p.action = "stopped:vacate"
+                    p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
+                else:
+                    p.action = "stopped:crawl"
+                    p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
                 continue
         p.action = "stopped"
         p.stop()
