@@ -898,6 +898,7 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     # 主罚选择:阶段内粘滞避免抖动。
     if store.prev_phase != Phase.OUR_SET_PLAY:
         store.set_play_taker = None
+        store.set_play_keeper = None
         store.ready_assignment = None
     # v2.6:不再只选「离球最近」,改为「到球后方接近点(ball-kick_dir*1.0)最近」
     # 者优先并排除门将:线上 20c6a6cb 多次 12-32s 才完成第一脚,贴边线球
@@ -905,6 +906,16 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     active_ids = {p.id for p in players}
     gx, gy = own_goal(context)
     keeper = min(players, key=lambda q: dist(q.pose.x, q.pose.y, gx, gy))
+    # v2.27(analyst 第27场 P0-1): 定位球防守 keeper 加 0.35m 粘滞,避免每帧
+    # 在门前两台间翻转导致解围/站位反复起停。
+    prev_keeper = getattr(store, "set_play_keeper", None)
+    if prev_keeper is not None:
+        prev_kp = next((q for q in players if q.id == prev_keeper), None)
+        if prev_kp is not None and dist(
+            prev_kp.pose.x, prev_kp.pose.y, gx, gy
+        ) <= dist(keeper.pose.x, keeper.pose.y, gx, gy) + SET_PLAY_KEEPER_KEEP_MARGIN_M:
+            keeper = prev_kp
+    store.set_play_keeper = keeper.id
     candidates = [q for q in players if q is not keeper] or players
     probe_dir, _ = _set_play_kick_plan(context, set_play, ball, None, active_ids)
     approach_x = ball.x - math.cos(probe_dir) * SET_PLAY_TAKER_APPROACH_M
@@ -949,7 +960,7 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             ball.y + iy * SET_PLAY_TAKER_INNER_OFFSET_M,
             0.3,
         )
-        taker.walk_to(approach, face=kick_dir, avoid_ball=True)
+        taker.walk_to(approach, face=kick_dir, avoid_ball=False)
     else:
         taker.kick(kick_dir, power)
 

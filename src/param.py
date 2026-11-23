@@ -431,5 +431,21 @@ TOUCHLINE_EXIT_MARGIN_M = 0.35       # |y| > half_w-0.35 且向外滚才算将�
 TOUCHLINE_STALL_S = 3.0
 TOUCHLINE_STALL_SPEED_MPS = 0.15
 # v2.26(analyst 第25场 ③): 定位球主罚中距离绕内侧(avoid_ball=True),避免身体顶球出线。
-SET_PLAY_TAKER_INNER_M = 0.9
-SET_PLAY_TAKER_INNER_OFFSET_M = 0.35
+SET_PLAY_TAKER_INNER_M = 1.25
+SET_PLAY_TAKER_INNER_OFFSET_M = 0.55
+
+# v2.27(analyst ball-progression/Lead m03470): support 不再站「球→己门」连线挡解围,
+# 改站解围方向侧后(ball.x+2.8、横向 2.2、选远离最近对手侧)。
+SUPPORT_CLEAR_AHEAD_M = 2.8
+SUPPORT_CLEAR_LATERAL_M = 2.2
+# v2.27: 同一球 0.6s 内二次起脚去重(第27场 432.6/432.7 两车连踢被门将挡回)。
+KICK_DEDUPE_WINDOW_S = 0.6
+KICK_DEDUPE_RADIUS_M = 0.6
+# v2.27: 门口容差带——|x|≥half_l 且 |y|≤1.6 视为活球必须清理,机器人上限 7.12。
+GOAL_MOUTH_BAND_X = 7.0
+GOAL_MOUTH_BAND_Y = 1.6
+GOAL_MOUTH_ROBOT_MAX_X = 7.12
+# v2.27: 贴线/门线球先走到球内侧 0.4m 再起脚,避免 kick 任务绕后空转(第27场 line_clear 28s)。
+LINE_APPROACH_INSET_M = 0.4
+# v2.27: 定位球防守 keeper 粘滞余量(避免门前两台每帧翻转)。
+SET_PLAY_KEEPER_KEEP_MARGIN_M = 0.35

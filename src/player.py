@@ -31,6 +31,9 @@ from .utils.geom import (
     own_goal,
     own_goal_area_center,
 )
+
+# v2.27: 同一球 0.6s 内二次起脚去重(跨机器人共享;单进程单场,模块级即可)。
+_BALL_KICK_LOG: dict[tuple[float, float], float] = {}
 from .utils.obstacles import collect_obstacles
 from .utils.path_planner import plan_global_path
 
@@ -276,6 +279,20 @@ class Player:
                 _log.warning("player %d kick skipped: kick plan unavailable", self.id)
                 return
             kick_direction, power = kick_plan
+
+        # v2.27: 同一球 0.6s 内二次起脚去重(第27场 432.6/432.7 两车连踢,解围被
+        # 自家队友挡回)。模块级登记最近一次起脚的球位;命中窗口则本帧不起脚。
+        _b = self.context.ball if self.context is not None else None
+        if _b is not None:
+            _now = self.context.now if self.context is not None else 0.0
+            _key = (round(_b.x, 1), round(_b.y, 1))
+            _last = _BALL_KICK_LOG.get(_key)
+            if _last is not None and 0.0 <= _now - _last < KICK_DEDUPE_WINDOW_S:
+                return
+            _BALL_KICK_LOG[_key] = _now
+            if len(_BALL_KICK_LOG) > 64:
+                for _k in list(_BALL_KICK_LOG)[:-32]:
+                    _BALL_KICK_LOG.pop(_k, None)
 
         # v2.21(#22): 后侧点出界时改成场内可达的踢球方向(见 _safe_kick_direction)。
         kick_direction = self._safe_kick_direction(kick_direction)
@@ -841,7 +858,13 @@ class Player:
         # v2.18(P2,analyst): 对称回收——越出己方门线也先退回场内。第 11 场 G4
         # robot3 在 (-7.19,-2.33) 卡 2s+、G9 门将 x=-7.08;越线后 kick 任务会
         # 反复绕球、甚至倒地,回放里出现门线外站位。
-        if self.pose.x < -(half_l + 0.02):
+        # v2.27: 门口容差带(第27场 G2 球在 (-7.0,-0.5) 站 16.4s 被捅入)——
+        # 球在门线容差带(|x|>=half_l-0.12 且 |y|<=1.6)时不再回场,按活球清理。
+        _goal_mouth_ball = (
+            abs(ball.x) >= GOAL_MOUTH_BAND_X - 0.12
+            and abs(ball.y) <= GOAL_MOUTH_BAND_Y
+        )
+        if self.pose.x < -(half_l + 0.02) and not _goal_mouth_ball:
             self.release_kick()
             self.action = "attack:recover_inside_def"
             self.walk_to(
@@ -991,6 +1014,20 @@ class Player:
                 )
                 return
             if abs(ball.x) > half_l - 1.0 or abs(ball.y) > half_w - 1.0:
+                # v2.27(analyst 第27场 P1): 贴线球先走到球内侧 0.4m 再起脚,避免
+                # kick 任务在边线反复绕后转向(第27场 robot3 距球 0.28m 空转 28s)。
+                if d > 0.6:
+                    _ix, _iy = -ball.x, -ball.y
+                    _n = math.hypot(_ix, _iy)
+                    if _n > 1e-6:
+                        _ix, _iy = _ix / _n, _iy / _n
+                    self.action = "attack:line_approach"
+                    self.omni_move_toward(
+                        (ball.x + _ix * LINE_APPROACH_INSET_M,
+                         ball.y + _iy * LINE_APPROACH_INSET_M),
+                        speed=1.4,
+                    )
+                    return
                 # 贴线活球:朝场中心解围。不要把球往场外踢(v1.10 的"保持距离"
                 # 分支反而让球 30s 无人触碰 → global_game_stuck；headless-04/05 实测)。
                 self.action = "attack:line_clear"
@@ -1166,9 +1203,15 @@ class Player:
             ball_speed = (
                 math.hypot(ball_vel[0], ball_vel[1]) if ball_vel is not None else 0.0
             )
+            # v2.27(analyst 第27场 P0-2): 门口容差带——球卡在 |x|≈7.0 门线外
+            # (G2 站 16.4s 被捅入)时,即使 ball.x < pose.x 也允许解围清理。
+            in_goal_mouth_band = (
+                abs(ball.x) >= GOAL_MOUTH_BAND_X - 0.12
+                and abs(ball.y) <= GOAL_MOUTH_BAND_Y
+            )
             if (
                 d_ball < KEEPER_CLEAR_RADIUS_M
-                and ball.x >= self.pose.x - 0.05
+                and (ball.x >= self.pose.x - 0.05 or in_goal_mouth_band)
                 # v2.23(Lead):门将出击门控放宽到 ball.x<0.5(球刚过中线也可处理);
                 # 更远的球门将回线站位,不再追出。
                 and ball.x < 0.5
@@ -1259,20 +1302,12 @@ class Player:
                     k = SUPPORT_MIN_BALL_DIST_M / away
                     tx, ty = ball.x + (tx - ball.x) * k, ball.y + (ty - ball.y) * k
         else:
-            # 防守支援:回到球与己方门之间,横向让开中路,不吃门将区。
-            ddx, ddy = gx - ball.x, gy - ball.y
-            d = math.hypot(ddx, ddy)
-            if d < 1e-6:
-                ux, uy = -1.0, 0.0
-            else:
-                ux, uy = ddx / d, ddy / d
-            along = min(DEFEND_SUPPORT_DIST_M, d)
-            tx = ball.x + ux * along
-            ty = ball.y + uy * along
-            side = 1.0 if ball.y >= 0.0 else -1.0
-            if nearest_opp is not None and abs(nearest_opp.y - ball.y) > 0.3:
-                side = -1.0 if nearest_opp.y > ball.y else 1.0
-            ty += side * SUPPORT_DEF_LATERAL_M
+            # v2.27(analyst ball-progression/Lead): 解围射线清空——旧「球→己门」
+            # 连线站位正好挡在门将/后卫解围射线上(第27场 5 次小禁区解围 8-9m/s
+            # 只飞 0.4-2.8m 被自家 1.5m 内 2-3 台挡回,7 次大脚 0 次过中线)。
+            # 改站解围方向侧后:ball.x+2.8、横向 ±2.2(选远离最近对手一侧)。
+            tx = ball.x + SUPPORT_CLEAR_AHEAD_M
+            ty = ball.y + side * SUPPORT_CLEAR_LATERAL_M
             tx = max(tx, SUPPORT_DEF_MIN_X)
 
         # 与 primary(持球人)保持距离,避免两台挤在一点。
