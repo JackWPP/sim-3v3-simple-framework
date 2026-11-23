@@ -281,3 +281,14 @@ STOP_CRAWL_SPEED = 0.0
 # 复盘:球静止 2-4s、最近人 0.74-0.83m 站着不抢,白给对手断球/补射。
 PRESSER_STALL_SPEED_MPS = 0.2
 PRESSER_TRIGGER_DIST_M = 1.2
+
+# v2.9:开球期非主罚不得原地 stay 站桩。第 4 场 f751146f 我方 7 张罚单全部
+# inactiveRobot:开球 phase 里非主罚按旧逻辑 stop() 站住,主罚触球后球滚到
+# robot1 脚边 0.31m 停住,10s 后三台陆续吃 inactiveRobot。改为每帧检查:
+# 球距自己 <3.2m 或球正向我方半场滚动(vx<0)时,主动退到安全点并保持走位。
+KICKOFF_STAY_SAFE_DIST_M = 3.2
+KICKOFF_SAFE_X = -2.5
+KICKOFF_SAFE_Y = 2.6
+KICKOFF_DEEP_SAFE_X = -4.0
+KICKOFF_DEEP_SAFE_Y = 2.0
+KICKOFF_BALL_TOWARD_HALF_VX = -0.05

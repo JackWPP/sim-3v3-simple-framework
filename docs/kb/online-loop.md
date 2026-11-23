@@ -76,7 +76,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | w未来希望（青铜，1141） | 1:2 负 | 3（3×stopped_motion：0.301/0.303/0.330m，均为对方定位球摆球期快撤残留速度） | **v2.5**；我方 466.6s 进球、230.8s/713.0s 失球（终场前 8.5s 绝杀）；min_pair<1m 4.7%（历次最好）；ball_in_home_half 54.2%；11 次 set_play_retake 全在我方定位球（对方 10 罚）；评分 1209→1156 |
 | 11-23 | FREE_BATTLE | 大魔王（白银，1206） | **1:1 平** | 0 | **v2.6**（ver11，sha 891ac82d…）；我方进球 sim533.8s、对方 sim463.3s；sim228.96s 我方 throwIn 第一脚直接进网被判 goal_disallowed_indirect（白丢 1 球）；retake 0（v2.5 是 11）；min_pair<1m 11.9%、球己方半场 48.9%；评分 1156→1161 |
 | 11-23 | FREE_BATTLE | 群玉阁（1155，0胜1平3负） | **0:6 负** | 3（2×fallenRobot 三台同点互撞 + 1×stopped_motion 0.332m/2.9s，v2.7 慢爬跨过 1.5s 宽限） | **v2.7 回归**：③对齐门控+ENTER 1.0 使 kick 反复起停（105 次尝试/49% 成功、kick 活动帧减半），球在己方三区 70.5%、对方三区触球 0、0 进球；6 球全在 PLAYING 自家半场，5 球前一刻球静止 2–3s 而我方最近人 0.59–1.03m 不动；52.44s 门球第一脚横穿自家门口送角球；rating 1161→1124 |
-| 11-23 | FREE_BATTLE | 高考加油（1217，0胜4负） | 进行中 | — | **v2.8**（ver13，sha 35b8458e…）：回退 v2.7③；保留门将 clamp/clear；①改宽限 1.15s@1.0 快撤后硬停；④横向轻推仅 ball.x>-2 |
+| 11-23 | FREE_BATTLE | 高考加油（1217，0胜4负） | **0:6 负** | 7（**全部 inactiveRobot**：robot1/2/2/3/3/1/3 @sim305.3/306.2/494.5/494.7/552.2/553.9/637.3） | **v2.8**（ver13，sha 35b8458e…）；开球期非主罚 stay 站桩：球滚到 robot1 脚边 0.31m 静止 >10s，294–305s 三台无 move/kick 指令；对方 2 罚（Illegal position/Fallen robot）；0 进球、失球 55.5/105.4/254.7/408.1/500.5/638.8；ball_in_home_half 86.2%、min_pair<1m 14.6%；retake 0；评分 1124→1098；→ v2.9 修开球期安全退让 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 

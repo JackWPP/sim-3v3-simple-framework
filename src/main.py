@@ -392,8 +392,10 @@ def _set_play_kick_plan(
     return angle_to(ball.x, ball.y, target[0], target[1]), power
 
 
-def _ball_speed_mps(context: Context, store) -> float | None:
-    """用上一帧球位置差分估算球速(m/s);首帧或断帧返回 None。"""
+def _ball_velocity_mps(
+    context: Context, store,
+) -> tuple[float, float] | None:
+    """用上一帧球位置差分估算球速向量(m/s);首帧或断帧返回 None。"""
     ball = context.ball
     if ball is None:
         return None
@@ -404,7 +406,15 @@ def _ball_speed_mps(context: Context, store) -> float | None:
     dt = context.now - prev[2]
     if dt <= 1e-3 or dt > 0.5:
         return None
-    return dist(prev[0], prev[1], ball.x, ball.y) / dt
+    return (ball.x - prev[0]) / dt, (ball.y - prev[1]) / dt
+
+
+def _ball_speed_mps(context: Context, store) -> float | None:
+    """用上一帧球位置差分估算球速(m/s);首帧或断帧返回 None。"""
+    vel = _ball_velocity_mps(context, store)
+    if vel is None:
+        return None
+    return math.hypot(vel[0], vel[1])
 
 
 def _act_normal(context: Context, players: list[Player], store) -> None:
@@ -544,11 +554,43 @@ def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
     # 非主罚球员必须在本方半场且中圈外。旧版直接 stop() 原地不动,若球权转换前
     # 人还在对方半场/中线附近,开球瞬间就吃 kickoff_kicking_side_outside_center
     # (iteration-10 实测 robot1 robotX=0.06、robot2 robotX=1.57,各 30s)。
+    # v2.9:第 4 场 f751146f 7 张 inactiveRobot 根因——开球期非主罚"原地 stay",
+    # 主罚触球后球滚到脚边 0.31m 停住,10s 内累计 inactive 被罚下。改为每帧
+    # 检查威胁:球 3.2m 内或球正向我方半场滚动 → 立刻退到安全点并保持走位,
+    # 不再 stop 站桩(安全点仍在己方半场、中圈外,满足开球站位规则)。
+    vel = _ball_velocity_mps(context, store)
+    ball_toward_half = (
+        vel is not None and vel[0] < KICKOFF_BALL_TOWARD_HALF_VX
+    )
     for idx, p in enumerate(rest):
+        if p.pose is None or ball is None:
+            p.action = "stay"
+            p.stop()
+            continue
+        d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
+        if d_ball < KICKOFF_STAY_SAFE_DIST_M or ball_toward_half:
+            # 选离球更远的一侧;安全点仍在球 3.2m 内则退到更深的一档。
+            side = (
+                1.0
+                if abs(ball.y - KICKOFF_SAFE_Y)
+                > abs(ball.y + KICKOFF_SAFE_Y)
+                else -1.0
+            )
+            sx = KICKOFF_SAFE_X
+            sy = side * KICKOFF_SAFE_Y
+            if dist(ball.x, ball.y, sx, sy) < KICKOFF_STAY_SAFE_DIST_M:
+                sx = KICKOFF_DEEP_SAFE_X
+                sy = side * KICKOFF_DEEP_SAFE_Y
+            target = _field_point(context, sx, sy, 0.3)
+            p.action = "kickoff:clear_stay"
+            p.walk_to(
+                target, face=0.0, avoid_ball=False, avoid_robots=True,
+            )
+            continue
         target = _field_point(
             context, -1.0, 2.4 if idx % 2 == 0 else -2.4, 0.3,
         )
-        needs_reposition = p.pose is not None and (
+        needs_reposition = (
             p.pose.x > -0.3
             or dist(p.pose.x, p.pose.y, 0.0, 0.0)
             < context.field.circle_radius + 0.2
