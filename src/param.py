@@ -303,7 +303,7 @@ KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
 # v3.1(P0-2, analyst):窗口用 stopped_detect_at 的 elapsed 计算(见 _act_stopped),
 # 1.3s@1.2m/s 在裁判 1.5s 宽限内完成撤离;旧值 0.5s 配 latency comp 1.15 是死代码。
 STOP_VACATE_WINDOW_S = 1.3
-STOP_VACATE_SPEED = 1.2          # v3.1(P0-2):0.5s 窗口内要撤 0.6m
+STOP_VACATE_SPEED = 0.8          # v3.1b:1.2m/s 硬停后残余滑行 ~0.31m>0.3m 吃 stopped_motion(第36场 4 张);0.8 残余 ~0.13m 安全
 # v2.6:GameControl 状态发布有 0~0.5s 延迟,记录 stopped_since 时回拨该补偿,
 # 让宽限窗口对齐裁判的真实计时点(否则宽限整体右移、刹车指令发晚)。
 # v2.16:0.35→1.15(analyst 第 10 场 0116ec1d 复盘)。M-02 真实判定窗只有 0.96s
