@@ -75,7 +75,8 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | Adam Hariz_0997（1338） | 0:5 负 | 0 | v2.4；对手更强（1338），5 球全从门前被横穿，keeper 角色在深位机器人间切换 |
 | 11-23 | FREE_BATTLE | w未来希望（青铜，1141） | 1:2 负 | 3（3×stopped_motion：0.301/0.303/0.330m，均为对方定位球摆球期快撤残留速度） | **v2.5**；我方 466.6s 进球、230.8s/713.0s 失球（终场前 8.5s 绝杀）；min_pair<1m 4.7%（历次最好）；ball_in_home_half 54.2%；11 次 set_play_retake 全在我方定位球（对方 10 罚）；评分 1209→1156 |
 | 11-23 | FREE_BATTLE | 大魔王（白银，1206） | **1:1 平** | 0 | **v2.6**（ver11，sha 891ac82d…）；我方进球 sim533.8s、对方 sim463.3s；sim228.96s 我方 throwIn 第一脚直接进网被判 goal_disallowed_indirect（白丢 1 球）；retake 0（v2.5 是 11）；min_pair<1m 11.9%、球己方半场 48.9%；评分 1156→1161 |
-| 11-23 | FREE_BATTLE | 群玉阁（1155，0胜1平3负） | 进行中 | — | **v2.7**（ver12，sha 423691ea…）：①stopped 窗口后 0.12m/s 径向慢爬（R-07 豁免、M-02 2s 0.24m 安全）②guard 站位 x clamp ≥-(half_l-inset)、clear 方向固定朝对方半场③踢球对齐门控：dot(机器→球,射门方向)>0.2 才 kick，否则绕球后侧；KICK_ENTER 2.0→1.0/EXIT 2.5→1.6④间接球短传落点距对方门线≥2m 且不在射门线上，无合格队友则中路横向轻推 |
+| 11-23 | FREE_BATTLE | 群玉阁（1155，0胜1平3负） | **0:6 负** | 3（2×fallenRobot 三台同点互撞 + 1×stopped_motion 0.332m/2.9s，v2.7 慢爬跨过 1.5s 宽限） | **v2.7 回归**：③对齐门控+ENTER 1.0 使 kick 反复起停（105 次尝试/49% 成功、kick 活动帧减半），球在己方三区 70.5%、对方三区触球 0、0 进球；6 球全在 PLAYING 自家半场，5 球前一刻球静止 2–3s 而我方最近人 0.59–1.03m 不动；52.44s 门球第一脚横穿自家门口送角球；rating 1161→1124 |
+| 11-23 | FREE_BATTLE | 高考加油（1217，0胜4负） | 进行中 | — | **v2.8**（ver13，sha 35b8458e…）：回退 v2.7③；保留门将 clamp/clear；①改宽限 1.15s@1.0 快撤后硬停；④横向轻推仅 ball.x>-2 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 

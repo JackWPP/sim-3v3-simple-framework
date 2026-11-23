@@ -759,28 +759,9 @@ class Player:
                 self.stop()
                 return
             kick_direction, kick_power = coord_plan
-            # v2.7:踢球任务只在「机器人已在球后方(朝射门方向)」时启动;否则先
-            # 绕到球后侧再踢。analyst b4c9a02e 4 例:机器人距球 0.74-0.83m 就
-            # 直接 kick,kick 任务走位不收敛、满速漂走 0.7-1.8m,2-4s 不触球。
-            dx_b = ball.x - self.pose.x
-            dy_b = ball.y - self.pose.y
-            to_ball = math.hypot(dx_b, dy_b)
-            aim_x, aim_y = math.cos(kick_direction), math.sin(kick_direction)
-            aligned = to_ball <= KICK_ALIGN_NEAR_M or (
-                to_ball > 1e-6
-                and (dx_b * aim_x + dy_b * aim_y) / to_ball > KICK_ALIGN_DOT_MIN
-            )
-            if aligned:
-                self.action = "attack:kick"
-                self.kick(kick_direction, kick_power)
-            else:
-                self.action = "attack:align"
-                behind = _behind_ball(
-                    ball.x, ball.y,
-                    (ball.x + aim_x * 2.0, ball.y + aim_y * 2.0),
-                    CHASE_BEHIND_M,
-                )
-                self.walk_to(behind, avoid_ball=False)
+            # v2.8:回退 v2.7 的对齐门控(kick 反复起停导致进攻瘫痪),恢复直接 kick。
+            self.action = "attack:kick"
+            self.kick(kick_direction, kick_power)
         else:
             self.release_kick()
             half_l = self.context.field.length / 2.0

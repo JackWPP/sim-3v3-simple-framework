@@ -374,10 +374,20 @@ def _set_play_kick_plan(
                 SET_PLAY_PASS_POWER_MAX,
             )
         else:
-            # v2.7:没有合格队友时不向前长踢(第一脚直接进门会被判无效),改为
-            # 朝中路的横向轻推,方向与对方门垂直,力度 <=3.5。
-            push_y = ball.y + (2.0 if ball.y <= 0.0 else -2.0)
-            target = (ball.x, clamp(push_y, -half_w + 1.2, half_w - 1.2))
+            # v2.8:横向轻推只在球已过半场附近(ball.x > -2)时用。复盘
+            # 60d19472:52.44s 我方门球第一脚从 (-6.00,-2.00) 横穿自家球门口
+            # 送到 (-6.97,+2.18),直接送对方角球;己方三区改为向前 2m、偏同侧
+            # 的解围方向轻推(仍不朝对方门线)。
+            if ball.x > -2.0:
+                push_y = ball.y + (2.0 if ball.y <= 0.0 else -2.0)
+                target = (ball.x, clamp(push_y, -half_w + 1.2, half_w - 1.2))
+            else:
+                side = 1.0 if ball.y >= 0.0 else -1.0
+                target = (
+                    clamp(ball.x + 2.0, -half_length + SET_PLAY_TARGET_MARGIN_M,
+                          goal_line_limit),
+                    clamp(ball.y + side * 1.5, -half_w + 1.2, half_w - 1.2),
+                )
             power = SET_PLAY_LATERAL_POWER
     return angle_to(ball.x, ball.y, target[0], target[1]), power
 
@@ -824,11 +834,11 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
                     p.action = "stopped:vacate"
                     p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
                 else:
-                    # v2.7:窗口过后不再硬停(硬停到主罚触球会吃 R-07),改为沿
-                    # 「球→机器人」径向以 0.12m/s 慢爬:径向远离满足 R-07 豁免,
-                    # 2s 位移 0.24m < 0.3m 不触发 M-02;直到 stopped=False 才停。
-                    p.action = "stopped:crawl"
-                    p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
+                    # v2.8:窗口(1.15s@1.0m/s)内已撤出 1.45m 风险圈,之后一律
+                    # 硬停。v2.7 的 0.12m/s 慢爬跨过 1.5s 静止宽限,2s 窗口累计
+                    # 0.332m>0.3m 吃了 stopped_motion(M-02)。
+                    p.action = "stopped:hold"
+                    p.stop()
                 continue
         p.action = "stopped"
         p.stop()
