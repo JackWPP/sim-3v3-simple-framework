@@ -71,6 +71,8 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | 宋明晖（白银 #508） | **3:3 平** | 1 罚（inactiveRobot robot2） | v2.0 协同首战；评分 1171 |
 | 11-23 | FREE_BATTLE | 阿白（白银，1242） | 0:4 负 | 2（illegalPosition/free_kick_avoidance） | v2.1；门将避球 bug 导致 4 球全失 |
 | 11-23 | FREE_BATTLE | 地表最强（白银，1209） | **4:0 胜** | 0 | v2.2；4 球（211/346/536/636s），对手 9 罚；积分 1171→1196 |
+| 11-23 | FREE_BATTLE | 瘤子牢孟（1135） | **4:1 胜** | 6（2×stopped_motion 0.31m + 4×fallenRobot） | v2.3；4 球（44/81/112/277s），对手 6 罚；support 前压导致挤球率回升到 19.6% |
+| 11-23 | FREE_BATTLE | Adam Hariz_0997（1338） | 待定 | — | v2.4（停止期不再爬行、support 前压回调） |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
@@ -110,3 +112,15 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 - v2.2 修复：门将 `avoid_ball=False`；球进 `KEEPER_CLEAR_RADIUS_M=1.35` 且开放球权时踢走解围；球更深时贴门线站位（inset 0.1m）；对方定位球摆球期先快撤（1.2s 内 2.0m/s）再以 0.12m/s 爬出 1.45m 风险圈（低于裁判 0.15m/s 漂移阈值，不吃 M-02）。
 - v2.2 效果：4:0、0 罚单、对手 9 罚（其 restart 干扰）；球在己方半场时间从 49% 降到 30%，反击/推进明显；
 - 下一轮方向（v2.3）：①我方 avg_nearest_to_ball 3.04m 偏高 → primary 更积极上抢/压迫（但要保留 support 距离）；②进攻转化：4 球但射门次数/触球分布需看 frames；③set-play pass 偶发 retake（我方 throw-in 被 retake 3 次）需让第一脚更稳（目标点远离边线、力度更小）。
+
+## 10. v2.3 / v2.4 复盘与改动
+
+- v2.3（4:1 胜 瘤子牢孟）：
+  - 改动：定位球第一脚落点内收（避边线 1.2m）、力度 4.0→3.6；support 前压阈值 2.5→0.8。
+  - 结果：4 球、球在己方半场降到 24.2%；但 min_pair<1m 回升到 19.6%（前压导致挤球）、avg_nearest 3.48m；我方 6 罚：2×stopped_motion（0.307/0.313m 略超 0.3 阈值，**爬行阶段残余位移**）+ 4×fallenRobot（摔倒后 10s 未起身；官方 get_up 检测判 FAILED）。
+  - 结论：support 前压过头；摆球期「爬行」不可取（0.3m/2s 预算太紧）。
+- v2.4 改动（已提交 version 9）：
+  - STOP_VACATE_WINDOW_S 1.2→0.6、STOP_VACATE_SPEED 2.0→1.5、**删除爬行阶段**（STOP_CRAWL_SPEED=0.0，宽限窗口内快撤，之后全停）；
+  - SUPPORT_OFFENSE_X 0.8→1.5（前压回调，减少挤球）；
+  - 保留 v2.3 的定位球安全落点。
+- 仍待解决：fallenRobot（摔倒后起身失败，10s 罚）——属于框架/物理层，策略侧只能减少碰撞/倒地（后续可加「避免与对手贴身冲撞」的进攻路线选择）。
