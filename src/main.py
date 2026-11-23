@@ -163,10 +163,7 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
                 and opp_score is not None
                 and opp_score > prev_opp
             ):
-                # v2.17(analyst): 失球后立刻进入 READY/SET,POST_CONCEDE_HOLD_S=3s
-                # 会在 READY 内就过期(死代码)。改为挂 pending,等第一个 NORMAL
-                # 帧(_act_normal)再开 3s 窗口,真正常规时间生效。
-                store.post_concede_pending = True
+                store.defend_hold_until = context.now + POST_CONCEDE_HOLD_S
             if opp_score is not None:
                 store.opp_score = opp_score
         game_state = g.state.value if g is not None else "none"
@@ -371,8 +368,6 @@ def _set_play_kick_plan(
         # 没有合格队友时退化为横向轻推。
         half_w = context.field.width / 2.0
         goal_line_limit = half_length - SET_PLAY_PASS_GOAL_LINE_GAP_M
-        # v2.23(regression 2c7ddf7):球门球豁免 v2.20 的 5m 限距/3.4 力度上限。
-        exempt_pass_limit = set_play is SetPlay.GOAL_KICK
         mate = None
         best = math.inf
         target = None
@@ -383,10 +378,6 @@ def _set_play_kick_plan(
                 continue
             d = dist(ball.x, ball.y, mate_state.pose.x, mate_state.pose.y)
             if d <= 0.8 or d >= best:
-                continue
-            # v2.20(analyst 第14场): 第一脚限距 5m——过远会被裁判视为「未完成
-            # 二次触球」的间接球场景(551s 界外球 10.2m 直送对方半场,进球被吹)。
-            if not exempt_pass_limit and d > SET_PLAY_PASS_MAX_DIST_M:
                 continue
             # v2.3:落点里收、避边线至少 1.2m,y 向中路拉,降低第一脚出界 retake。
             tx = clamp(mate_state.pose.x, -half_length + 1.2, half_length - 1.2)
@@ -422,9 +413,7 @@ def _set_play_kick_plan(
             power = clamp(
                 SET_PLAY_PASS_POWER_BASE + SET_PLAY_PASS_POWER_PER_M * pass_dist,
                 SET_PLAY_PASS_POWER_MIN,
-                SET_PLAY_PASS_POWER_MAX_EXEMPT
-                if exempt_pass_limit
-                else SET_PLAY_PASS_POWER_MAX,
+                SET_PLAY_PASS_POWER_MAX,
             )
         else:
             # v2.8:横向轻推只在球已过半场附近(ball.x > -2)时用。复盘
@@ -559,10 +548,6 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     ball = context.ball
     if ball is None:  # 理论不可达(上面的 None 分支已 return),防御性收窄类型
         return
-    # v2.17: 失球后的防守窗口从「进入 NORMAL 的第一帧」起算(README/SET 不算)。
-    if getattr(store, "post_concede_pending", False):
-        store.defend_hold_until = context.now + POST_CONCEDE_HOLD_S
-        store.post_concede_pending = False
 
     # v2.0 协同分工:先固定 1 台门将(离己方门最近),绝不让门将参与抢球;
     # 剩下两人里离球最近者当 primary(抢/带/射),最后一人当 support(接应/保护)。
@@ -606,24 +591,11 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         near = min(
             field_players, key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
         )
-        chosen = near
-        # v2.17(analyst 第11场): presser 粘滞 1s,避免 distance 排序换人导致
-        # 「手递手」浪费 0.3–0.5s(第11场 G1/G3 presser 交接)。
-        prev_id = getattr(store, "presser_id", None)
-        if getattr(store, "presser_until", 0.0) > context.now and prev_id is not None:
-            prev = next((q for q in field_players if q.id == prev_id), None)
-            if prev is not None:
-                chosen = prev
-        if (
-            dist(chosen.pose.x, chosen.pose.y, ball.x, ball.y)
-            > PRESSER_TRIGGER_DIST_M
-        ):
-            forced_presser = chosen
+        if dist(near.pose.x, near.pose.y, ball.x, ball.y) > PRESSER_TRIGGER_DIST_M:
+            forced_presser = near
     if forced_presser is not None:
         attacker = forced_presser
         store.normal_attacker = attacker.id
-        store.presser_id = attacker.id
-        store.presser_until = context.now + PRESSER_HOLD_S
         # v2.12(P0-a): 己方三区死球不再绕位,直接站到球的门侧再解围。第 7 场
         # sim 148.31/554.53 两失球同型:三区静止球,我方最近者绕位 1.5s 不触球,
         # 对手 0.35m 先捅;解围方向朝对方半场边线(不在门前横传)。
@@ -642,17 +614,15 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
                 ux, uy = -1.0, 0.0
             ax = ball.x + PRESSER_DEADBALL_APPROACH_M * ux
             ay = ball.y + PRESSER_DEADBALL_APPROACH_M * uy
-            d_ball = (
-                dist(attacker.pose.x, attacker.pose.y, ball.x, ball.y)
-                if attacker.pose is not None
-                else 99.0
-            )
-            if d_ball > PRESSER_KICK_DIST_M:
-                # v2.17(analyst): 1.6m/s omni 直冲门侧点,不再按 walk_to 低速绕行。
+            if (
+                attacker.pose is not None
+                and dist(attacker.pose.x, attacker.pose.y, ax, ay) > 0.25
+            ):
                 attacker.action = "pressing:clear_approach"
-                attacker.omni_move_toward(
+                attacker.walk_to(
                     _field_point(context, ax, ay, 0.4),
-                    speed=PRESSER_APPROACH_SPEED_MPS,
+                    avoid_ball=False,
+                    avoid_robots=True,
                 )
             else:
                 side = 1.0 if ball.y >= 0.0 else -1.0
@@ -898,7 +868,6 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     # 主罚选择:阶段内粘滞避免抖动。
     if store.prev_phase != Phase.OUR_SET_PLAY:
         store.set_play_taker = None
-        store.set_play_keeper = None
         store.ready_assignment = None
     # v2.6:不再只选「离球最近」,改为「到球后方接近点(ball-kick_dir*1.0)最近」
     # 者优先并排除门将:线上 20c6a6cb 多次 12-32s 才完成第一脚,贴边线球
@@ -906,16 +875,6 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     active_ids = {p.id for p in players}
     gx, gy = own_goal(context)
     keeper = min(players, key=lambda q: dist(q.pose.x, q.pose.y, gx, gy))
-    # v2.27(analyst 第27场 P0-1): 定位球防守 keeper 加 0.35m 粘滞,避免每帧
-    # 在门前两台间翻转导致解围/站位反复起停。
-    prev_keeper = getattr(store, "set_play_keeper", None)
-    if prev_keeper is not None:
-        prev_kp = next((q for q in players if q.id == prev_keeper), None)
-        if prev_kp is not None and dist(
-            prev_kp.pose.x, prev_kp.pose.y, gx, gy
-        ) <= dist(keeper.pose.x, keeper.pose.y, gx, gy) + SET_PLAY_KEEPER_KEEP_MARGIN_M:
-            keeper = prev_kp
-    store.set_play_keeper = keeper.id
     candidates = [q for q in players if q is not keeper] or players
     probe_dir, _ = _set_play_kick_plan(context, set_play, ball, None, active_ids)
     approach_x = ball.x - math.cos(probe_dir) * SET_PLAY_TAKER_APPROACH_M
@@ -936,8 +895,7 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
 
     kick_dir, power = _set_play_kick_plan(context, set_play, ball, taker.id, active_ids)
     taker.action = f"setplay:{set_play.value}"
-    d_taker_ball = dist(taker.pose.x, taker.pose.y, ball.x, ball.y)
-    if d_taker_ball > SET_PLAY_NEAR_BALL_M:
+    if dist(taker.pose.x, taker.pose.y, ball.x, ball.y) > SET_PLAY_NEAR_BALL_M:
         # 先绕到球的"踢球侧"(贴边线时会被夹进场内,足够接近后下一帧直接踢)。
         approach = _field_point(
             context,
@@ -945,21 +903,8 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             ball.y - math.sin(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
             0.3,  # v2.15:绕行目标留 0.3m 场内余量(analyst 提醒)
         )
-        # v2.26(analyst 第25场 ③): avoid_ball=True 绕开球走,避免身体把球顶出线
-        # (第25场 427.5-428.15s: taker 绕后时把球顶出边线→留在摆位点→R-06)。
-        taker.walk_to(approach, face=kick_dir, avoid_ball=True)
-    elif d_taker_ball > SET_PLAY_TAKER_INNER_M:
-        # v2.26: 中距离(0.9-2.2m)也先绕到球内侧再踢,别直线撞球。
-        ix, iy = 0.0, 0.0
-        norm = math.hypot(ball.x, ball.y)
-        if norm > 1e-6:
-            ix, iy = -ball.x / norm, -ball.y / norm  # 球→场地中心方向
-        approach = _field_point(
-            context,
-            ball.x + ix * SET_PLAY_TAKER_INNER_OFFSET_M,
-            ball.y + iy * SET_PLAY_TAKER_INNER_OFFSET_M,
-            0.3,
-        )
+        # v2.14:avoid_ball=False(analyst+Lead:绕开球会让主罚多绕 1-2s 才触球,
+        # 线上第 7 场定位球首触中位 12.2s;接近点已缩到 0.5m,直接走向球更稳)。
         taker.walk_to(approach, face=kick_dir, avoid_ball=False)
     else:
         taker.kick(kick_dir, power)

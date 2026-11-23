@@ -31,9 +31,6 @@ from .utils.geom import (
     own_goal,
     own_goal_area_center,
 )
-
-# v2.27: 同一球 0.6s 内二次起脚去重(跨机器人共享;单进程单场,模块级即可)。
-_BALL_KICK_LOG: dict[tuple[float, float], float] = {}
 from .utils.obstacles import collect_obstacles
 from .utils.path_planner import plan_global_path
 
@@ -120,15 +117,6 @@ class Player:
         self._guard_threatened: bool = False
         # 门线撞球进门迟滞状态
         self._goal_line_push: bool = False
-        # v2.25: 贴边线球「踢完朝场内退」的撤退目标(None=未触发)
-        self._touchline_retreat: tuple[float, float] | None = None
-        # v2.26: 贴线活球静止计时 + 上一帧球位(算球速,判断是否向外滚)
-        self._touchline_still_since: float | None = None
-        self._touch_ball_prev: tuple[float, float, float] | None = None
-        # v2.17: 门将过线点预测用的球速差分缓存;解围卡死自恢复计时。
-        self._ball_prev: tuple[float, float, float] | None = None
-        self._clear_kick_started: float | None = None
-        self._clear_ball_xy: tuple[float, float] | None = None
         # support 卡住后临时转 attack 的跨帧状态
         self._support_last_pos: tuple[float, float] | None = None
         self._support_stationary_since: float | None = None
@@ -200,62 +188,58 @@ class Player:
     # 踢球
     # ------------------------------------------------------------------
 
-    def _safe_kick_direction(self, direction: float) -> float:
-        """v2.21(analyst 第15场 #22): 校验 kick 后侧绕球点是否在场内。
+    # ------------------------------------------------------------------
+    # v3.0 patch1(#22): 贴线球踢球方向可行域夹取
+    # ------------------------------------------------------------------
+    def _axis_bounds(self, ball_c: float, off: float, lim: float) -> tuple[float, float] | None:
+        """后侧点约束 |ball_c - off*u| <= lim 给出的 u 可行区间(off>0)。"""
+        if abs(off) < 1e-9:
+            return None
+        lo = (ball_c - lim) / off
+        hi = (ball_c + lim) / off
+        if lo > hi:
+            lo, hi = hi, lo
+        if lo > hi:
+            return None
+        return lo, hi
 
-        后端 kick 任务先绕到「球后侧点」(ball - 0.45·dir) 再推球;球贴边线/
-        门线时该点会落在场外,后端绕不过去 → 反复起停(第 15 场 3 个失球同根,
-        G1 界外球 14.9s 长传、G2 门线双人 kick 卡死 4.5s、G3 贴边线 4s 踢不到)。
-        出界时按 ±0.35rad 步进旋向场内候选方向;己方半场禁止明显朝己方门。
-        """
+    def _safe_kick_direction(self, direction: float) -> float:
+        """v3.0 patch1(#22): 后侧点出界时把方向分量夹进可行域;失败回退旧旋转搜索。"""
         ctx = self.context
         ball = ctx.ball if ctx is not None else None
-        if ball is None or ctx.field is None:
+        if ball is None or self.pose is None:
             return direction
         half_l = ctx.field.length / 2.0
         half_w = ctx.field.width / 2.0
         lim_x = half_l - KICK_BEHIND_MARGIN_M
         lim_y = half_w - KICK_BEHIND_MARGIN_M
+        off = KICK_BEHIND_OFFSET_M
 
-        def behind_inside(angle: float) -> bool:
-            bx = ball.x - math.cos(angle) * KICK_BEHIND_OFFSET_M
-            by = ball.y - math.sin(angle) * KICK_BEHIND_OFFSET_M
+        def behind_inside(d: float) -> bool:
+            bx = ball.x - math.cos(d) * off
+            by = ball.y - math.sin(d) * off
             return abs(bx) <= lim_x and abs(by) <= lim_y
 
         if behind_inside(direction):
             return direction
-        # v2.25(analyst 第21场 §5.1): 组件级夹取替代「整方向 ±0.35rad 外旋搜索」。
-        # 旧逻辑在贴线球位(如 ball.y=4.45 > lim_y=4.35)会把合法的「内传」方向
-        # 整支旋成朝边线外,我方界外球/角球 0.1s 自出界 → 对方同点摆球 →
-        # taker 仍在原地被摆球判 R-06(defender_set_play_interference)。
-        # 现在只夹「会导致后侧点出界的分量」,保留另一分量不变。
-        def _axis_bounds(ball_c: float, off: float, lim: float):
-            lo = max((ball_c - lim) / off, -1.0)
-            hi = min((ball_c + lim) / off, 1.0)
-            if lo > hi:
-                return None
-            return lo, hi
 
-        bx_b = _axis_bounds(ball.x, KICK_BEHIND_OFFSET_M, lim_x)
-        by_b = _axis_bounds(ball.y, KICK_BEHIND_OFFSET_M, lim_y)
-        if bx_b is not None and by_b is not None:
-            ux = clamp(math.cos(direction), bx_b[0], bx_b[1])
-            uy = clamp(math.sin(direction), by_b[0], by_b[1])
-            norm = math.hypot(ux, uy)
-            if norm > 1e-6:
-                ux, uy = ux / norm, uy / norm
-                cand = math.atan2(uy, ux)
-                # 夹取+归一化后仍须验证后侧点在场内;己方半场禁止明显朝己门。
-                if behind_inside(cand) and not (ball.x < 0.0 and ux < -0.2):
+        ux, uy = math.cos(direction), math.sin(direction)
+        bx = self._axis_bounds(ball.x, off, lim_x)
+        by = self._axis_bounds(ball.y, off, lim_y)
+        if bx is not None and by is not None:
+            cx = clamp(ux, bx[0], bx[1])
+            cy = clamp(uy, by[0], by[1])
+            n = math.hypot(cx, cy)
+            if n > 1e-6:
+                cand = math.atan2(cy / n, cx / n)
+                if behind_inside(cand) and not (ball.x < 0.0 and math.cos(cand) < -0.2):
                     return cand
-        for step in (0.35, 0.7, 1.05, 1.4, 1.75, 2.1, 2.45, 2.8, 3.14):
+        # 回退:旧 ±0.35rad 旋转搜索(保留己方半场不朝己门的保护)。
+        for k in range(1, 9):
             for sign in (1.0, -1.0):
-                cand = normalize_angle(direction + sign * step)
-                if not behind_inside(cand):
-                    continue
-                if ball.x < 0.0 and math.cos(cand) < -0.2:
-                    continue
-                return cand
+                cand = normalize_angle(direction + sign * 0.35 * k)
+                if behind_inside(cand) and not (ball.x < 0.0 and math.cos(cand) < -0.2):
+                    return cand
         return direction
 
     def kick(
@@ -280,23 +264,6 @@ class Player:
                 return
             kick_direction, power = kick_plan
 
-        # v2.27: 同一球 0.6s 内二次起脚去重(第27场 432.6/432.7 两车连踢,解围被
-        # 自家队友挡回)。模块级登记最近一次起脚的球位;命中窗口则本帧不起脚。
-        _b = self.context.ball if self.context is not None else None
-        if _b is not None:
-            _now = self.context.now if self.context is not None else 0.0
-            _key = (round(_b.x, 1), round(_b.y, 1))
-            _last = _BALL_KICK_LOG.get(_key)
-            if _last is not None and 0.0 <= _now - _last < KICK_DEDUPE_WINDOW_S:
-                return
-            _BALL_KICK_LOG[_key] = _now
-            if len(_BALL_KICK_LOG) > 64:
-                for _k in list(_BALL_KICK_LOG)[:-32]:
-                    _BALL_KICK_LOG.pop(_k, None)
-
-        # v2.21(#22): 后侧点出界时改成场内可达的踢球方向(见 _safe_kick_direction)。
-        kick_direction = self._safe_kick_direction(kick_direction)
-
         if self._backend is None:
             _log.debug(
                 "player %d kick ball=(%.3f, %.3f) dir=%.3f (no backend)",
@@ -310,6 +277,8 @@ class Player:
         sin_t = math.sin(pose.theta)
         ball_x_body = dx * cos_t + dy * sin_t
         ball_y_body = -dx * sin_t + dy * cos_t
+        # v3.0 patch1(#22): 后侧点出界时改成场内可达的踢球方向。
+        kick_direction = self._safe_kick_direction(kick_direction)
         kick_direction = normalize_angle(kick_direction)
         direction_body = normalize_angle(kick_direction - pose.theta)
         power_clamped = max(KICK_POWER_MIN, min(KICK_POWER_MAX, power))
@@ -855,122 +824,23 @@ class Player:
             )
             return
 
-        # v2.18(P2,analyst): 对称回收——越出己方门线也先退回场内。第 11 场 G4
-        # robot3 在 (-7.19,-2.33) 卡 2s+、G9 门将 x=-7.08;越线后 kick 任务会
-        # 反复绕球、甚至倒地,回放里出现门线外站位。
-        # v2.27: 门口容差带(第27场 G2 球在 (-7.0,-0.5) 站 16.4s 被捅入)——
-        # 球在门线容差带(|x|>=half_l-0.12 且 |y|<=1.6)时不再回场,按活球清理。
-        _goal_mouth_ball = (
-            abs(ball.x) >= GOAL_MOUTH_BAND_X - 0.12
-            and abs(ball.y) <= GOAL_MOUTH_BAND_Y
-        )
-        if self.pose.x < -(half_l + 0.02) and not _goal_mouth_ball:
-            self.release_kick()
-            self.action = "attack:recover_inside_def"
-            self.walk_to(
-                (-(half_l - 0.9), clamp(self.pose.y, -half_w + 0.7, half_w - 0.7)),
-                face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
-                avoid_ball=False,
-                avoid_robots=True,
+        # v3.0 patch2: 禁止越过己方门线(x 上限 -7.12);但球在门口容差带时
+        # 属活球必须清理,不回场(否则球卡门线外 15s+ 被捅入)。
+        if self.pose.x < -(half_l + 0.02):
+            in_goal_mouth_band = (
+                abs(ball.x) >= GOAL_MOUTH_BAND_X - 0.12
+                and abs(ball.y) <= GOAL_MOUTH_BAND_Y
             )
-            return
-
-        # v2.25/v2.26(Lead m03269/m03386, analyst 第23/25场): 贴线球与前场抢射。
-        # 先用跨帧球位算球速: 前场抢射/贴线是否「向外滚」都依赖它。
-        now = self.context.now if self.context is not None else 0.0
-        prev = self._touch_ball_prev
-        vel = None
-        if prev is not None:
-            dt = now - prev[2]
-            if 1e-3 < dt <= 0.5:
-                vel = ((ball.x - prev[0]) / dt, (ball.y - prev[1]) / dt)
-        self._touch_ball_prev = (ball.x, ball.y, now)
-        speed = math.hypot(vel[0], vel[1]) if vel is not None else None
-        d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
-        half_l = self.context.field.length / 2.0
-        half_w = self.context.field.width / 2.0
-        goal_half = self.context.field.goal_width / 2.0
-
-        # v2.26(analyst 进球解剖): 前场抢射——球已过中线、距对方门 ≤9m、慢球时
-        # 直接 omni 冲球并一脚射远角。我们近 3 场 30 射 0 次 <8m,胜局进球全是
-        # 距门 4.0-9.4m 的一触终结,必须先制造这类机会。
-        if ball.x > FRONT_SNAP_BALL_X:
-            dist_goal = dist(ball.x, ball.y, half_l, 0.0)
-            if dist_goal <= FRONT_SNAP_GOAL_DIST_M and (
-                speed is None or speed < FRONT_SNAP_BALL_SPEED_MPS
-            ):
-                if d <= FRONT_SNAP_CONTACT_M:
-                    side = 1.0 if ball.y >= 0.0 else -1.0
-                    aim_y = -side * max(goal_half - FRONT_SNAP_CORNER_INSET_M, 0.0)
-                    self.action = "attack:front_snap"
-                    self.kick(
-                        angle_to(ball.x, ball.y, half_l + 0.5, aim_y),
-                        SHOOT_POWER_MAX,
-                    )
-                else:
-                    self.action = "attack:front_chase"
-                    self.omni_move_toward(
-                        (ball.x, ball.y), speed=FRONT_SNAP_SPEED_MPS
-                    )
-                return
-
-        # v2.26(analyst 第25场 ①): 贴线球收口。旧 v2.25 分支只要 |y|>half_w-0.7
-        # 就「从内侧接近→踢→退场」,造成活球 53.8s 无人触/0.35m 仍 retreat 的回归。
-        # 现在只有「球确实即将出界」(|y|>half_w-0.35 且向外滚)才退场;活球/静止
-        # 球照常抢触;活球贴线静止 >3s 强制最近者触球。
-        if abs(ball.y) > half_w - TOUCHLINE_GUARD_M:
-            inward = -1.0 if ball.y > 0.0 else 1.0
-            outward = vel is not None and inward * vel[1] < -0.15
-            truly_leaving = (
-                abs(ball.y) > half_w - TOUCHLINE_EXIT_MARGIN_M and outward
-            )
-            still = speed is not None and speed < TOUCHLINE_STALL_SPEED_MPS
-            if still:
-                if self._touchline_still_since is None:
-                    self._touchline_still_since = now
-            else:
-                self._touchline_still_since = None
-            stalled = (
-                self._touchline_still_since is not None
-                and now - self._touchline_still_since >= TOUCHLINE_STALL_S
-            )
-            if not truly_leaving:
-                self._touchline_retreat = None
-            if self._touchline_retreat is not None and not stalled:
-                rx, ry = self._touchline_retreat
-                if math.hypot(self.pose.x - rx, self.pose.y - ry) < 0.4:
-                    self._touchline_retreat = None
-                else:
-                    self.action = "attack:touchline_retreat"
-                    self.walk_to(
-                        (clamp(rx, -half_l + 1.5, half_l - 1.5),
-                         clamp(ry, -half_w + 1.2, half_w - 1.2)),
-                        face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
-                        avoid_ball=True,
-                        avoid_robots=True,
-                    )
-                    return
-            if d > TOUCHLINE_KICK_DIST_M:
-                self.action = "attack:touchline_approach"
+            if not in_goal_mouth_band:
+                self.release_kick()
+                self.action = "attack:recover_inside_def"
                 self.walk_to(
-                    (clamp(ball.x, -half_l + 1.2, half_l - 1.2),
-                     clamp(ball.y + inward * TOUCHLINE_APPROACH_M,
-                           -half_w + 0.55, half_w - 0.55)),
+                    (-(half_l - 0.9), clamp(self.pose.y, -half_w + 0.7, half_w - 0.7)),
                     face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
                     avoid_ball=False,
                     avoid_robots=True,
                 )
                 return
-            aim_x = ball.x + (2.0 if ball.x < 0.0 else -2.0)
-            aim_y = ball.y + inward * 2.5
-            self.action = "attack:touchline_clear"
-            self.kick(angle_to(ball.x, ball.y, aim_x, aim_y), KICK_POWER_CLEAR)
-            if truly_leaving:
-                self._touchline_retreat = (
-                    clamp(ball.x + (0.5 if ball.x < 0.0 else -0.5), -half_l + 1.5, half_l - 1.5),
-                    clamp(ball.y + inward * TOUCHLINE_RETREAT_M, -half_w + 1.2, half_w - 1.2),
-                )
-            return
 
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
         self._kicking = d <= (KICK_EXIT_M if self._kicking else KICK_ENTER_M)
@@ -987,18 +857,12 @@ class Player:
                 ball.x > half_l - 1.0
                 and abs(ball.y) <= goal_half + GOAL_LINE_SHOT_Y_MARGIN_M
             ):
-                # v2.21(#23): 旧条件是「pose.x<=ball.x-0.2 才走位、否则射门」,
-                # 而走位目标 ball.x-0.45 恰好落在该区间内 → robot3 到位后每帧
-                # 重复走位、永远不满足射门条件,在球后 0.47m 站 21s 吃
-                # inactiveRobot(第 15 场 230b0f05)。改为按实际距球判定:
-                # 距球 >0.55m 才继续靠近(目标 ball.x-0.35),到位即射。
-                d_ball = dist(self.pose.x, self.pose.y, ball.x, ball.y)
-                if d_ball > 0.55:
+                if self.pose.x <= ball.x - 0.2:
                     self.release_kick()
                     self.action = "attack:goal_line_approach"
                     self.walk_to(
                         (
-                            ball.x - 0.35,
+                            ball.x - 0.45,
                             clamp(ball.y, -half_w + 0.3, half_w - 0.3),
                         ),
                         face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
@@ -1014,20 +878,6 @@ class Player:
                 )
                 return
             if abs(ball.x) > half_l - 1.0 or abs(ball.y) > half_w - 1.0:
-                # v2.27(analyst 第27场 P1): 贴线球先走到球内侧 0.4m 再起脚,避免
-                # kick 任务在边线反复绕后转向(第27场 robot3 距球 0.28m 空转 28s)。
-                if d > 0.6:
-                    _ix, _iy = -ball.x, -ball.y
-                    _n = math.hypot(_ix, _iy)
-                    if _n > 1e-6:
-                        _ix, _iy = _ix / _n, _iy / _n
-                    self.action = "attack:line_approach"
-                    self.omni_move_toward(
-                        (ball.x + _ix * LINE_APPROACH_INSET_M,
-                         ball.y + _iy * LINE_APPROACH_INSET_M),
-                        speed=1.4,
-                    )
-                    return
                 # 贴线活球:朝场中心解围。不要把球往场外踢(v1.10 的"保持距离"
                 # 分支反而让球 30s 无人触碰 → global_game_stuck；headless-04/05 实测)。
                 self.action = "attack:line_clear"
@@ -1069,6 +919,9 @@ class Player:
                 return
             behind = _behind_ball(ball.x, ball.y, kick_target, CHASE_BEHIND_M)
             behind = (min(behind[0], half_l - 0.5), behind[1])
+            # v3.0 patch2: 己方侧同理,机器人 |x| 不超过 7.12-0.5。
+            if behind[0] < -(half_l - 0.5):
+                behind = (-(half_l - 0.5), behind[1])
             self.walk_to(behind)
 
     def guard(self) -> None:
@@ -1091,29 +944,6 @@ class Player:
 
         ball = ctx.ball
         half_l = ctx.field.length / 2.0
-        # v2.17: 球速差估计(过线点预测/解围卡死判据),跨帧差分、防 dt 异常。
-        ball_vel: tuple[float, float] | None = None
-        if ball is not None:
-            if self._ball_prev is not None:
-                px, py, pt = self._ball_prev
-                dt = ctx.now - pt
-                if 1e-3 < dt <= 0.5:
-                    ball_vel = ((ball.x - px) / dt, (ball.y - py) / dt)
-            self._ball_prev = (ball.x, ball.y, ctx.now)
-        # v2.18: 门将若被 kick 任务的绕球位移带到己方门线外(第11场 G9 x=-7.08),
-        # 先 release 退回场内,否则门线空了对方补射即进。
-        if self.pose.x < -(half_l + 0.02):
-            self.release_kick()
-            self.action = "guard:recover_inside"
-            self.walk_to(
-                (-(half_l - 1.0), clamp(self.pose.y, -ctx.field.width / 2.0 + 0.7,
-                                       ctx.field.width / 2.0 - 0.7)),
-                face=0.0,
-                avoid_ball=False,
-                avoid_robots=True,
-            )
-            return
-
         # v2.16(Lead m02385):门将解围后不追球。解围踢出后球若已离开解围半径,
         # 立刻结束 kick 任务回门线站位,避免门将跟着球跑离门口。
         if (
@@ -1147,21 +977,6 @@ class Player:
                 cover_gain = KEEPER_TRACK_GAIN_FAR
                 cover_lim = KEEPER_TRACK_Y_LIMIT_FAR
             cover_y = clamp(ball.y * cover_gain, -cover_lim, cover_lim)
-            # v2.17: 朝我方门快速滚动的球按「过线点」跟随(球横传/折射时 y 跟对)。
-            # v2.20(analyst 第14场): 去掉「球在己方半场」门控——对方在己方半场
-            # 起脚的长射(第14场 sim51.6 从 x=4.5 起脚 12.27m 入网)也应预测过线点,
-            # 否则门将不横移(dy1.22)被穿。t_cross 上限 2.0、目标 y clamp ±1.15。
-            if (
-                ball_vel is not None
-                and math.hypot(ball_vel[0], ball_vel[1])
-                >= KEEPER_PREDICT_MIN_SPEED_MPS
-                and ball_vel[0] < KEEPER_PREDICT_MIN_VX
-            ):
-                t_cross = (-half_l - ball.x) / ball_vel[0]
-                if 0.0 < t_cross <= KEEPER_PREDICT_MAX_TIME_S:
-                    cover_y = clamp(
-                        ball.y + ball_vel[1] * t_cross, -1.15, 1.15
-                    )
             home = (home[0], cover_y)
 
         # 待命朝向:朝球(便于快速反应);球不可见则朝对方门方向(默认 0)。
@@ -1169,53 +984,17 @@ class Player:
         if GUARD_FACE_BALL and ball is not None:
             face = angle_to(self.pose.x, self.pose.y, ball.x, ball.y)
 
-        # v2.17: 解围卡死自恢复。球门前 0.8s 内基本没动 = kick 任务在绕球/顶球
-        # 卡住(第 11 场 G8 门将 0.8m 处连续 kick 6s、球没动),结束 kick 回门线,
-        # 避免门将长时间离开门线(对方补射时门线空)。
-        if self._clear_kick_started is not None:
-            if ball is None:
-                self.release_kick()
-                self._clear_kick_started = None
-                self._clear_ball_xy = None
-            else:
-                elapsed = ctx.now - self._clear_kick_started
-                moved = dist(
-                    ball.x, ball.y, self._clear_ball_xy[0], self._clear_ball_xy[1]
-                )
-                if moved >= KEEPER_CLEAR_STALL_M:
-                    self._clear_kick_started = None
-                    self._clear_ball_xy = None
-                elif elapsed >= KEEPER_CLEAR_TIMEOUT_S:
-                    self.release_kick()
-                    self._clear_kick_started = None
-                    self._clear_ball_xy = None
-                    self.action = "guard:recover"
-                    self.walk_to(
-                        home, face=face, avoid_ball=False, avoid_robots=True
-                    )
-                    return
-
         # 门前解围(v2.2):球在解围半径内且开放球权 → 直接踢走,避免被补射/乌龙。
         if ball is not None and open_play:
             d_ball = dist(self.pose.x, self.pose.y, ball.x, ball.y)
-            # v2.18: 只对慢球解围(快球=射门,门将应站位不追);球在身后也不 kick
-            # (绕到球后会把门线让空,第11场 4/5 失球均为此类)。
-            ball_speed = (
-                math.hypot(ball_vel[0], ball_vel[1]) if ball_vel is not None else 0.0
-            )
-            # v2.27(analyst 第27场 P0-2): 门口容差带——球卡在 |x|≈7.0 门线外
-            # (G2 站 16.4s 被捅入)时,即使 ball.x < pose.x 也允许解围清理。
+            # v3.0 patch2: 门口容差带(|x|>=6.88 且 |y|<=1.6)的活球必须清理,
+            # 解围半径放宽 0.5m,避免球卡门线外没人碰。
             in_goal_mouth_band = (
                 abs(ball.x) >= GOAL_MOUTH_BAND_X - 0.12
                 and abs(ball.y) <= GOAL_MOUTH_BAND_Y
             )
-            if (
-                d_ball < KEEPER_CLEAR_RADIUS_M
-                and (ball.x >= self.pose.x - 0.05 or in_goal_mouth_band)
-                # v2.23(Lead):门将出击门控放宽到 ball.x<0.5(球刚过中线也可处理);
-                # 更远的球门将回线站位,不再追出。
-                and ball.x < 0.5
-                and ball_speed < KEEPER_CLEAR_MAX_BALL_SPEED_MPS
+            if d_ball < KEEPER_CLEAR_RADIUS_M or (
+                in_goal_mouth_band and d_ball < KEEPER_CLEAR_RADIUS_M + 0.5
             ):
                 # v2.7:解围方向固定朝对方半场(禁止朝己方门);仍带 y 校准,
                 # 让球踢向中路而不是边线。
@@ -1223,8 +1002,6 @@ class Player:
                     ball.x, ball.y, half_l * 0.6, clamp(ball.y * 0.3, -2.0, 2.0)
                 )
                 self.action = "guard:clear"
-                self._clear_kick_started = ctx.now
-                self._clear_ball_xy = (ball.x, ball.y)
                 self.kick(clear_dir, KEEPER_CLEAR_POWER)
                 return
 
@@ -1302,12 +1079,20 @@ class Player:
                     k = SUPPORT_MIN_BALL_DIST_M / away
                     tx, ty = ball.x + (tx - ball.x) * k, ball.y + (ty - ball.y) * k
         else:
-            # v2.27(analyst ball-progression/Lead): 解围射线清空——旧「球→己门」
-            # 连线站位正好挡在门将/后卫解围射线上(第27场 5 次小禁区解围 8-9m/s
-            # 只飞 0.4-2.8m 被自家 1.5m 内 2-3 台挡回,7 次大脚 0 次过中线)。
-            # 改站解围方向侧后:ball.x+2.8、横向 ±2.2(选远离最近对手一侧)。
-            tx = ball.x + SUPPORT_CLEAR_AHEAD_M
-            ty = ball.y + side * SUPPORT_CLEAR_LATERAL_M
+            # 防守支援:回到球与己方门之间,横向让开中路,不吃门将区。
+            ddx, ddy = gx - ball.x, gy - ball.y
+            d = math.hypot(ddx, ddy)
+            if d < 1e-6:
+                ux, uy = -1.0, 0.0
+            else:
+                ux, uy = ddx / d, ddy / d
+            along = min(DEFEND_SUPPORT_DIST_M, d)
+            tx = ball.x + ux * along
+            ty = ball.y + uy * along
+            side = 1.0 if ball.y >= 0.0 else -1.0
+            if nearest_opp is not None and abs(nearest_opp.y - ball.y) > 0.3:
+                side = -1.0 if nearest_opp.y > ball.y else 1.0
+            ty += side * SUPPORT_DEF_LATERAL_M
             tx = max(tx, SUPPORT_DEF_MIN_X)
 
         # 与 primary(持球人)保持距离,避免两台挤在一点。

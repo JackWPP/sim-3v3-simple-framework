@@ -194,14 +194,7 @@ SET_PLAY_TAKER_KEEP_MARGIN_M = 0.6
 SET_PLAY_PASS_POWER_BASE = 3.0
 SET_PLAY_PASS_POWER_PER_M = 0.25
 SET_PLAY_PASS_POWER_MIN = 3.0
-# v2.20(analyst 第14场): 间接球第一脚限距 5m + 力度上限 3.4——
-# 551s 界外球 taker 磨 14.5s、第一脚 10.2m 抽到对方半场,第二触 9s 后才发生,
-# 裁判只记 1 触 → 进球被判 goal_disallowed_indirect。短传必须「近、软、快二次触球」。
-SET_PLAY_PASS_MAX_DIST_M = 5.0
-SET_PLAY_PASS_POWER_MAX = 3.4
-# v2.23(regression 2c7ddf7): 球门球/角球第一脚豁免 5m 限距与 3.4 力度上限——
-# 球门球需要把球送得更远(解围性质),限距反而让第一脚落在危险区。
-SET_PLAY_PASS_POWER_MAX_EXEMPT = 4.5
+SET_PLAY_PASS_POWER_MAX = 4.5
 # v2.7:间接球第一脚禁止「直接/折射进门被判无效」:落点距对方门线至少该值(m),
 # 且离「球→对方门中心」的射门线至少 SET_PLAY_PASS_OFFLINE_M(m);没有合格队友时
 # 改为朝中路的横向轻推,力度 <=3.5。
@@ -289,31 +282,10 @@ SHOOT_POWER_MAX = 7.5     # 射门力度上限(降低打飞出底线概率)
 # v2.2:门将出击解围 + 关键站位修正
 # 线上 v2.1 首战 0:1(阿白):门将 walk_to 带了 avoid_ball=True,当球滚到门前
 # (门将目标≈球位置)时避球力把门将往反方向推,球从门线横穿时门将反而后退。
-# v2.17(analyst 第11场复盘): 1.35→0.85。5 个失球里 4 个门将正在 guard:clear
-# 追球、离线 0.22–0.68m,y 只跟当前球 y 不跟过线点(dy 0.60–0.82);球门前 0.85m
-# 内才出击,减少门将离开门线的机会。
-KEEPER_CLEAR_RADIUS_M = 0.85
+KEEPER_CLEAR_RADIUS_M = 1.35   # 球进入该半径内门将直接踢走(解围)
 KEEPER_CLEAR_POWER = 6.0       # 解围力度
 KEEPER_DEEP_BALL_X = -5.0      # 球比这更深时门将贴门线站位
 KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
-
-# v2.17(analyst): 门将过线点预测 + 解围卡死自恢复。
-# 球速 >= 0.4m/s 且朝我方门滚动(vx<-0.3)时,用 ball.y+vy*time_to_line 作为
-# 跟随目标,而不是当前 ball.y(球横传/折射时门将 y 跟错方向)。
-KEEPER_PREDICT_MIN_SPEED_MPS = 0.4
-KEEPER_PREDICT_MIN_VX = -0.3      # 仅朝己方门滚动的球才预测过线点
-KEEPER_PREDICT_MAX_TIME_S = 2.0   # 预测时域上限(v2.20: 3.0→2.0, 跨半场长射 t_cross≤2.0)
-# 出击解围后 0.8s 内球位移 <0.2m → 判定 kick 卡死,release_kick 回门线。
-KEEPER_CLEAR_TIMEOUT_S = 0.8
-KEEPER_CLEAR_STALL_M = 0.2
-# v2.18(analyst P0-2 补全): 只对慢球解围(球速>=0.6m/s 说明射门/快传,门将应先站位);
-# 球在身后(ball.x<pose.x)不 kick,避免绕到球后把门线让空。
-KEEPER_CLEAR_MAX_BALL_SPEED_MPS = 0.6
-# v2.21(analyst 第15场 #22): 后端 kick 任务会先绕到「球后侧点」(ball-0.45·dir)再推球;
-# 球贴边线/门线时该点落在场外,后端绕不过去→反复起停(第15场3个失球同根)。
-# kick 前校验后侧点是否在场内(留 0.15m 余量),出界则按角度步进旋向场内候选方向。
-KICK_BEHIND_OFFSET_M = 0.45
-KICK_BEHIND_MARGIN_M = 0.02
 
 # v2.2:对方定位球摆球期间的撤离节奏。
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
@@ -376,12 +348,7 @@ PRESSER_TRIGGER_DIST_M = 1.2
 # 我方最近者绕位1.5s不触球,对手0.35m先捅)。x < 该值即视为己方三区。
 OWN_THIRD_CLEAR_BALL_X = -3.5
 # v2.12: 死球解围时先站到球的门侧,再起脚。
-# v2.17(analyst 第11场): 0.45→0.30,压迫点到球更近,减少「手递手」绕行。
-PRESSER_DEADBALL_APPROACH_M = 0.30
-# v2.17: presser 粘滞窗口(1s)与直接起脚距离,减少每帧换人浪费 0.3–0.5s。
-PRESSER_HOLD_S = 1.0
-PRESSER_KICK_DIST_M = 0.55
-PRESSER_APPROACH_SPEED_MPS = 1.6
+PRESSER_DEADBALL_APPROACH_M = 0.45
 
 # v2.12(P1): 清球落点改朝边线(避免中路送二点/底线送对方门球)。
 # 落点 x = half_l - KICK_CLEAR_TARGET_X_FROM_GOAL,y = ±(half_w - 该余量)。
@@ -409,43 +376,20 @@ DATA_LOSS_PATROL_STEP_M = 0.6     # 巡逻目标点相对自身的距离
 DATA_LOSS_PATROL_FLIP_S = 2.0     # 换向周期(s)
 DATA_LOSS_APPROACH_M = 1.2        # 距最后已知球位小于该值后转入巡逻
 
-# v2.25(Lead m03269 ②/analyst 第23场): 贴边线球处理——非门将最近者从场内
-# 一侧接近、朝场内踢,踢完立刻朝场内退 2.0m;避免「追到就触球」后把自己
-# 留在出界点(裁判把对方界外球摆到脚下 0.25m → R-06 defender_touched_before_kick)。
-TOUCHLINE_GUARD_M = 0.7        # |ball.y| > half_w - 0.7 视为贴边线
-TOUCHLINE_APPROACH_M = 0.55    # 从场内一侧接近的偏移(站在球内侧)
-TOUCHLINE_KICK_DIST_M = 0.65   # 距球 ≤0.65m 才起脚
-TOUCHLINE_RETREAT_M = 2.0      # 踢完朝场内退的距离
+# v3.0(Lead m03523 restore 实验): #22 贴线球方向校验参数
+KICK_BEHIND_OFFSET_M = 0.45
+KICK_BEHIND_MARGIN_M = 0.02
+# v3.0: 门口容差带清理
+GOAL_MOUTH_BAND_X = 6.88
+GOAL_MOUTH_BAND_Y = 1.6
+GOAL_MOUTH_ROBOT_MAX_X = 7.12
 
-# v2.26(analyst 进球解剖/Lead m03386): 前场抢射分支——我们近 3 场 30 射 0 次
-# <8m、禁区触球 6/0/0,胜局 6 球全是「距门 4.0-9.4m 一触终结」,需主动进前场抢射。
-FRONT_SNAP_BALL_X = 0.8              # 球过中线(本队视角 +x)才触发
-FRONT_SNAP_GOAL_DIST_M = 9.0         # 距对方门 ≤9m
-FRONT_SNAP_BALL_SPEED_MPS = 0.8      # 球速 <0.8(慢球/停球)才抢射
-FRONT_SNAP_CONTACT_M = 0.55          # 距球 ≤0.55m 直接射
-FRONT_SNAP_SPEED_MPS = 1.6           # 直冲速度(omni)
-FRONT_SNAP_CORNER_INSET_M = 0.35     # 瞄远角(goal_half-inset)
-# v2.26(analyst 第25场 ①): 贴线球收口——只有「确实即将出界」才退场;
-# 活球/贴线静止球照常抢触;活球贴线静止 >3s 强制最近者触球(防 53.8s 无人触)。
-TOUCHLINE_EXIT_MARGIN_M = 0.35       # |y| > half_w-0.35 且向外滚才算将出界
-TOUCHLINE_STALL_S = 3.0
-TOUCHLINE_STALL_SPEED_MPS = 0.15
-# v2.26(analyst 第25场 ③): 定位球主罚中距离绕内侧(avoid_ball=True),避免身体顶球出线。
-SET_PLAY_TAKER_INNER_M = 1.25
-SET_PLAY_TAKER_INNER_OFFSET_M = 0.55
-
-# v2.27(analyst ball-progression/Lead m03470): support 不再站「球→己门」连线挡解围,
-# 改站解围方向侧后(ball.x+2.8、横向 2.2、选远离最近对手侧)。
-SUPPORT_CLEAR_AHEAD_M = 2.8
-SUPPORT_CLEAR_LATERAL_M = 2.2
-# v2.27: 同一球 0.6s 内二次起脚去重(第27场 432.6/432.7 两车连踢被门将挡回)。
-KICK_DEDUPE_WINDOW_S = 0.6
-KICK_DEDUPE_RADIUS_M = 0.6
-# v2.27: 门口容差带——|x|≥half_l 且 |y|≤1.6 视为活球必须清理,机器人上限 7.12。
+# v3.0 patch1(#22, v2.25 验证过的夹取修法): 后侧点出界时把踢球方向分量夹进可行域,
+# 避免贴线球被强制朝边线外踢(第21/23/24 场 R-06 与自出界主因)。
+KICK_BEHIND_OFFSET_M = 0.45
+KICK_BEHIND_MARGIN_M = 0.02
+# v3.0 patch2(v2.27 P0#4): 门口容差带——|x|>=half_l 且 |y|<=1.6 视为活球必须清理,
+# 机器人 |x| 上限 7.12,不得越过门线追球卡死。
 GOAL_MOUTH_BAND_X = 7.0
 GOAL_MOUTH_BAND_Y = 1.6
 GOAL_MOUTH_ROBOT_MAX_X = 7.12
-# v2.27: 贴线/门线球先走到球内侧 0.4m 再起脚,避免 kick 任务绕后空转(第27场 line_clear 28s)。
-LINE_APPROACH_INSET_M = 0.4
-# v2.27: 定位球防守 keeper 粘滞余量(避免门前两台每帧翻转)。
-SET_PLAY_KEEPER_KEEP_MARGIN_M = 0.35
