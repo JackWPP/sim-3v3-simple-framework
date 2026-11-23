@@ -101,6 +101,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-24 | FREE_BATTLE | Diego y la gente（1069） | **3:0 胜** | 0 | **v2.25**（ver31）：我方 0 罚/对方 0、0 retake；rating 1056→1074（+18）；小样本 2/3（1 胜 1 负）；归档待补 |
 | 11-24 | FREE_BATTLE | 句号（1106） | **1:4 负** | 0 | **v2.26**（ver32）：我方 0 罚/0 retake、对方 2 罚；失球 sim89.7/151.5/311.5/660.1、进球 sim556.9；ball 半场 69.7%、oob 11/11、min_pair 19.8%；rating 1074→1057（−17）；小样本 1/3 |
 | 11-24 | FREE_BATTLE | 123213（1169） | **2:3 负** | 0 | **v2.26**（ver32）：进球 sim158.2/245.1、失球 sim280.1/411.9/501.2；0 罚/0 retake；ball 半场 62.4%、oob 8/15；rating 1057→1044（−13）；小样本 2/3 |
+| 11-24 | FREE_BATTLE | 11_8342（1281） | **0:2 负** | 0 | **v2.26**（ver32）：失球 sim69.0/694.6、对方 1 球被吹 indirect；0 罚/retake 2；ball 半场 74.8%、oob 24/24；rating 1044→1036（−8）；v2.26 小样本 3/3 完成（全负但 0 罚/0 R-06/0 R-07） |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
