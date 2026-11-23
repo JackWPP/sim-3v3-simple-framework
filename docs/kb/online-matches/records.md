@@ -21,6 +21,8 @@
 | 8 | 2026-11-23 19:25 | v2.12 (ver17) | 123213 | 1087 | **1:2 负** | 2（stopped_motion@sim129.0 0.333m/2.69s，throwIn stopped 期；fallenRobot@sim710.9 upDot0.08，终场前 0.5s 可忽略） | 0 | 失球 sim96.8/183.5（均 ready/kickOff 后不久）、我方进球 sim214.1；对方 496.5 进球被判 goal_disallowed_indirect（改我方 goalKick）；retake 0；协同 home avg_pair 4.42、min_pair<1m 10.3%、two<1.5m 2.4%、avg_nearest 2.8、ball_in_home_half **60.6%**（v2.11 38.2% 退回）；oob 我方 awarded 14/caused 13（对方 13/14）；72 段 sha 72/72、6126 帧、711.4s；rating 1141→1110（-31）、对方 1087→1169（+82） | **v2.13 待 analyst 复盘**（重点：两失球链路、v2.12 三区死球解围/清球改边线是否反送机会、presser 1.8 副作用、stopped_motion 最小修法） | docs/kb/reviews/3083b42e-0239-442e-b8fe-d19cd6a6d6ab.md（待 analyst 出） | **有效**（v2.12 首战；连输弱队，v2.13 只小步修防守） |
 | 9 | 2026-11-23 19:47 | v2.13 (ver18) | 0707 | 1177 | **3:0 胜** | 2（defender_set_play_interference robot1@sim460.02；illegalPosition robot2@sim553.0 distanceToBall 1.005） | 1（fallenRobot robot5@sim121.0） | 我方进球 sim152.07/365.6/661.31；**stopped_motion 0**（v2.13 窗口 0.5 生效，M-02 归零）；retake 2（均为对方重踢，我方定位球防守违例导致）；协同 home avg_pair 5.97、min_pair<1m 9.0%、two<1.5m 3.5%、avg_nearest 2.62、ball_in_home_half **27.5%**（历次最佳，v2.12 60.6%）；oob 我方 awarded 17/caused 9（v2.12 13）、对方 9/17；72 段 sha 72/72、6180 帧、714.5s；rating 1110→1138（+28）、对方 1177→1055（-122） | **v2.14**：①STOP_CRAWL_SPEED 0.0→0.12（窗口 0.5 快撤 + 窗口后径向慢爬，修 R-07/illPosition）②我方定位球 taker 提速（avoid_ball=False、APPROACH 1.0→0.5、落点距最近对手≥1.6m） | docs/kb/reviews/d1ebca78-6710-4ca3-b5ee-5bb082978399.md（待 analyst 出） | **有效**（v2.13；stopped_motion 归零且胜） |
 
+| 10 | 2026-11-23 20:13 | v2.14 (ver19) | 你美式吧 | 1041 | **3:0 胜** | 1（stopped_motion robot2@sim118.99，distanceMoved **0.3348m**、durationSinceStopped **2372ms**，位置 robot(6.767,−4.304)/reference(6.888,−4.582)；疑 v2.14 crawl 0.12 在 2.37s 内累计 ~0.285m + 残余速度越 0.3m 阈值） | **21 全部 illegalPosition**（12×outside_own_half + 9×kickoff_kicking_side_outside_center；对方 robot4/5/6 在对方开球/我方开球时站到 x≈−1.5~−2.9 我方半场，sim 38.5/172.2/267.3/329.0/424.4/507.5/581.4 成批被罚 30s） | 我方进球 sim **150.93/284.01/556.84**（全 home）；对方 sim124.29 进球被判 goal_disallowed_own_free_kick（own goal from free kick，awardedSide home）；retake 0；协同 home avg_pair 5.26、min_pair<1m **2.9%**、two<1.5m 1.4%、avg_nearest 3.83、ball_in_home_half **14.8%**（历次最佳，但受对方罚下影响）；away pair 3.05/min<1m 38.5%/nearest 6.03；oob 我方 awarded 3/caused 2、对方 2/3；66 段 sha 66/66、5837 帧、657.6s；rating 1138→1158（+20），对方 1041→999（−42）；**对手 21 张罚单含大量送分，需 analyst 判读控制力是否真实提升** | **v2.15**：①定位球防守等待点「径向先行+逐帧闭环」：`_act_stopped` 触发 1.8→2.3、撤离目标 2.0→2.6；`_act_opp_set_play` 距球<1.7 立即径向退 2.6、1.7–3.3 沿 2.6m 圆弧朝等待点旋转（弦线离球≥2.48m）、≥3.3 才等；②M-02 修订：STOP_STATE_LATENCY_COMP_S 0.35→1.15（检测即 crawl）+ 撤离目标距 pose<0.9m 时不动 + crawl 0.10 保险；③P1 门线球：越线(x>half_l+0.02)先回收场内，对方门线前≤1.0m 改补射入网（取代朝场中心解围）；验收：连 3 场 R-06/R-07/M-02 全零+逐帧非门将距球≥1.7m、M-02 逐帧位移≤0.02m/1s 路径≤0.15m、clean 场门线球 2s 补进率≥80% | docs/kb/reviews/0116ec1d-a87e-45ce-a8f5-ccdf71416610.md（待 analyst 出） | **无效**（数据有效性过滤：对方罚单 21>3、约 245s 对方 0 人在场，数据失真不用于迭代判断；analyst 判读+Lead m02136 裁定） |
+
 ## 提交门禁（v2.11 起，每次 build/submit 前必跑）
 
 v2.5–v2.10 连续踩到「静态可查、线上才爆」的 NameError（v2.5 `_act_opp_kickoff` 缺 `store` 形参；
@@ -35,4 +37,15 @@ v2.7 `_act_normal` presser 分支裸 `ball`），两次都被 framework `runtime
    （当前全部归档对局 ≥10 场均需 PASS、play() 0 异常；真实回放帧逐帧重建 Context，含 OPP_KICKOFF 等相位；v2.11 实测 12/12 PASS）
 
 辅助：`python3 -m py_compile src/main.py src/player.py src/param.py` + `python3 tools/check_names.py`（CHECK_OK）。
+
+## 数据有效性过滤（v2.15 起，Lead m02136）
+
+对局数据在以下情况「失真、不作策略迭代依据」，记 **无效**（有效局计数不 +1）：
+
+- 对方罚单 > 3 张（对方大量送分/送人，场面不能反映我方策略真实强弱）；
+- 对方有 0 人在场（全部罚下/离场）累计 > 60s；
+- 裁判/回放数据缺失（driver 未覆盖的相位、事件与帧明显矛盾）。
+
+判定依据来自 match detail 的 `home_fouls/away_fouls`、事件流罚单与 replay 逐帧机器人计数；
+写 records 时在「有效」列注明无效原因。第 10 场（0116ec1d，对方 21 罚、约 245s 0 人）为首例。
 

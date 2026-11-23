@@ -112,6 +112,18 @@ RESTART_AVOID_RADIUS_M = 1.45
 SET_PLAY_DEF_GAP_M = 2.7
 # 防守等待点距球距离；>3m 避开 M-05(球 3m 内 10s 不动罚下)。
 SET_PLAY_DEF_SAFE_DIST_M = 3.3
+
+# v2.15:对方定位球防守「径向先行 + 逐帧闭环」(analyst 第 9 场 d1ebca78 复盘,
+# Lead m01991)。第 9 场两张罚单(R-06 defender_set_play_interference@460.02、
+# R-07 illegalPosition 1.005m@553.0)根因:等待点 _defender_set_play_spot 落在
+# 球的另一侧,机器人从摆球期位置直线走过去时路径穿球。现在:
+#   - _act_stopped:撤离触发 1.45+0.35=1.8 → 2.3m,撤离目标 2.0 → 2.6m;
+#   - _act_opp_set_play:等待时先沿「球→机器人」径向绕到球对侧,在半径 2.6m
+#     的圆弧上逐步推进(弦线离球最近 2.48m),每帧保证非门将距球≥1.7m。
+STOP_VACATE_TRIGGER_M = 2.3
+STOP_VACATE_TARGET_M = 2.6
+SET_PLAY_DEF_ORBIT_RADIUS_M = 2.6
+SET_PLAY_DEF_MIN_CLEAR_M = 1.7
 # 对方开球时等待点距球距离；中圈半径 1.5,必须 >1.55 且在 >3m 外避开 M-05。
 OPP_KICKOFF_WAIT_RADIUS_M = 3.2
 # 门将退到门线附近时距门线的距离(m)。
@@ -282,13 +294,20 @@ STOP_VACATE_WINDOW_S = 0.5
 STOP_VACATE_SPEED = 1.0
 # v2.6:GameControl 状态发布有 0~0.5s 延迟,记录 stopped_since 时回拨该补偿,
 # 让宽限窗口对齐裁判的真实计时点(否则宽限整体右移、刹车指令发晚)。
-STOP_STATE_LATENCY_COMP_S = 0.35
+# v2.16:0.35→1.15(analyst 第 10 场 0116ec1d 复盘)。M-02 真实判定窗只有 0.96s
+# (reference 116.89→传送 117.85),0.3348m≈0.35m/s 是「0.5s@1.0m/s 快撤残余段」
+# 跨过 grace;crawl 只贡献约 0.1m。回拨 1.15s 后,检测到 stopped 时 elapsed 已
+# 超过窗口 → 直接走 crawl(0.10m/s),首个判定窗内位移约 0.1m<0.3m。
+STOP_STATE_LATENCY_COMP_S = 1.15
 # v2.8:慢爬归零(窗口已延长到 1.15s,足够撤出 1.45m 风险圈),窗口后一律硬停。
 # v2.14:0.0→0.12。v2.13 窗口 0.5s 快撤后硬停,线上 d1ebca78 第 9 场仍吃 2 张
 # 定位球防守罚单(defender_set_play_interference + illegalPosition 1.005m<1.45);
 # 盘带期径向慢爬远离满足 R-07 的「径向远离」豁免,0.12m/s 在 M-02 的 2s 观察窗
 # 内仅 0.24m<0.3m。
-STOP_CRAWL_SPEED = 0.12
+# v2.15:0.12→0.10。线上 0116ec1d 第 10 场 stopped_motion 0.3348m/2372ms
+# (v2.14 crawl 0.12m/s×2.37s≈0.285m + 残余速度,越 0.3m 阈值);0.10m/s 在
+# 2.4s 内仅 0.24m<0.3m,仍满足 R-07「径向远离」豁免(≥0.05m/s)。
+STOP_CRAWL_SPEED = 0.10
 # v2.7:活球「站桩」修复(P0)。球几乎静止且我方非门将无人进入 1.2m 时,
 # 强制最近的非门将去抢(绕过 support/粘滞选择)。线上 dffb89db/b4c9a02e
 # 复盘:球静止 2-4s、最近人 0.74-0.83m 站着不抢,白给对手断球/补射。

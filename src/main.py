@@ -23,7 +23,14 @@ from .framework.agent import SoccerAgentMixin
 from .framework.types import KICKING_TEAM_NONE, Context, GameState, SetPlay
 from .param import *
 from .player import Player
-from .utils import angle_to, clamp, dist, opponent_goal, own_goal
+from .utils import (
+    angle_to,
+    clamp,
+    dist,
+    normalize_angle,
+    opponent_goal,
+    own_goal,
+)
 
 
 _log = logging.getLogger(__name__)
@@ -869,7 +876,7 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             context,
             ball.x - math.cos(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
             ball.y - math.sin(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
-            0.25,
+            0.3,  # v2.15:绕行目标留 0.3m 场内余量(analyst 提醒)
         )
         # v2.14:avoid_ball=False(analyst+Lead:绕开球会让主罚多绕 1-2s 才触球,
         # 线上第 7 场定位球首触中位 12.2s;接近点已缩到 0.5m,直接走向球更稳)。
@@ -957,11 +964,45 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
     for i, p in enumerate(rest):
         d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
         target = _defender_set_play_spot(context, ball, laterals[i % len(laterals)])
-        if d_ball < SET_PLAY_DEF_GAP_M:
-            # 仍在 1.45m 判定区附近:用全向平移(不转身)快速撤离。walk_to 在远距离
-            # 会先原地转身(MAX_ANGULAR=2rad/s,转 180° 约 1.6s),来不及躲开主罚触球。
-            p.action = "opp_setplay:escape"
+        if d_ball < SET_PLAY_DEF_MIN_CLEAR_M:
+            # v2.15:已进入 R-07(1.45m)红线外侧缓冲带:先纯径向退到 2.6m,
+            # 不转头、不等 walk_to 转身,尽快脱离判定区。
+            target = _away_from_ball_point(
+                context, ball, p.pose, SET_PLAY_DEF_ORBIT_RADIUS_M
+            )
+            p.action = "opp_setplay:radial_escape"
             p.omni_move_toward(target)
+        elif d_ball < SET_PLAY_DEF_SAFE_DIST_M:
+            # v2.15:径向先行 + 逐帧闭环。第 9 场 d1ebca78 两张罚单的根因是
+            # 从摆球期位置直线走向「球对侧」等待点时路径穿球(R-06 触球 /
+            # R-07 1.005m)。这里改为在「以球心为圆心、半径 2.6m」的圆弧上
+            # 朝等待点方向逐步旋转(每帧 ≤0.55rad),弦线离球最近 2.48m,
+            # 既绕开球又始终远离 1.45m 红线。
+            ux, uy = (p.pose.x - ball.x) / d_ball, (p.pose.y - ball.y) / d_ball
+            wx, wy = target[0] - ball.x, target[1] - ball.y
+            wn = math.hypot(wx, wy)
+            if wn < 1e-6:
+                p.action = "opp_setplay:wait"
+                p.move_to_position(target)
+                continue
+            a_pose = math.atan2(uy, ux)
+            a_wait = math.atan2(wy / wn, wx / wn)
+            step = clamp(normalize_angle(a_wait - a_pose), -0.55, 0.55)
+            a = a_pose + step
+            tx = ball.x + math.cos(a) * SET_PLAY_DEF_ORBIT_RADIUS_M
+            ty = ball.y + math.sin(a) * SET_PLAY_DEF_ORBIT_RADIUS_M
+            ox, oy = _field_point(context, tx, ty, 0.3)
+            if dist(ox, oy, ball.x, ball.y) < SET_PLAY_DEF_MIN_CLEAR_M:
+                # v2.15:贴边/角球时圆弧点会被夹进场内(离球变近),
+                # 退回纯径向撤离,绝不朝球移动。
+                target = _away_from_ball_point(
+                    context, ball, p.pose, SET_PLAY_DEF_ORBIT_RADIUS_M
+                )
+                p.action = "opp_setplay:radial_escape"
+                p.omni_move_toward(target)
+            else:
+                p.action = "opp_setplay:orbit"
+                p.omni_move_toward((ox, oy))
         else:
             p.action = "opp_setplay:wait"
             p.move_to_position(target)
@@ -1022,11 +1063,16 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
             and p.id != keeper_id
         ):
             d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
-            if d_ball < RESTART_AVOID_RADIUS_M + 0.35:
+            # v2.15:触发 1.8→2.3m、撤离目标 2.0→2.6m(analyst 第 9 场复盘:
+            # 摆在 1.8-2.3m 的机器人主罚触球瞬间常在 1.45m 红线附近)。
+            if d_ball < STOP_VACATE_TRIGGER_M:
                 target = _away_from_ball_point(
-                    context, ball, p.pose, RESTART_AVOID_RADIUS_M + 0.55
+                    context, ball, p.pose, STOP_VACATE_TARGET_M
                 )
-                if elapsed <= STOP_VACATE_WINDOW_S:
+                if (
+                    elapsed <= STOP_VACATE_WINDOW_S
+                    and dist(p.pose.x, p.pose.y, target[0], target[1]) >= 0.9
+                ):
                     p.action = "stopped:vacate"
                     p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
                 else:
@@ -1034,8 +1080,15 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
                     # v2.13 硬停后线上 d1ebca78(第 9 场)仍吃 defender_set_play_
                     # interference + illegalPosition(距球 1.005m<1.45,R-07)各 1 张;
                     # 慢速径向远离满足 R-07 豁免,0.12m/s 在 M-02 2s 观察窗内仅 0.24m。
-                    p.action = "stopped:crawl"
-                    p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
+                    # v2.16:目标被 clamp 到距 pose<0.9m 时(贴边/角旗)直接停,
+                    # 不为了 0.3m 的撤离在判定窗里多走;否则 0.10m/s 径向慢爬
+                    # (R-07「径向远离」豁免要求 ≥0.05m/s)。
+                    if dist(p.pose.x, p.pose.y, target[0], target[1]) < 0.9:
+                        p.action = "stopped:hold"
+                        p.stop()
+                    else:
+                        p.action = "stopped:crawl"
+                        p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
                 continue
         p.action = "stopped"
         p.stop()

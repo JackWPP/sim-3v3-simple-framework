@@ -752,11 +752,40 @@ class Player:
             )
             return
 
+        half_l = self.context.field.length / 2.0
+        half_w = self.context.field.width / 2.0
+        # v2.15(P1,Lead):禁止越出对方门线。线上 0116ec1d 机器人追贴线球时被
+        # kick 任务的绕球位移带到 x≈7.3 门线外卡死 15s+,而门线前 0.1-0.85m
+        # 的散球因此全部补不进;越线即先退回场内再继续进攻。
+        if self.pose.x > half_l + 0.02:
+            self.release_kick()
+            self.action = "attack:recover_inside"
+            self.walk_to(
+                (half_l - 0.9, clamp(self.pose.y, -half_w + 0.7, half_w - 0.7)),
+                face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
+                avoid_ball=False,
+                avoid_robots=True,
+            )
+            return
+
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
         self._kicking = d <= (KICK_EXIT_M if self._kicking else KICK_ENTER_M)
         if self._kicking:
             half_l = self.context.field.length / 2.0
             half_w = self.context.field.width / 2.0
+            if ball.x > half_l - 1.0 and self.pose.x > ball.x - 0.2:
+                # v2.15(P1,Lead):球贴近对方门线(≤1.0m)时直接补射入网。
+                # 旧逻辑把这种球朝场中心解围(kick 方向指回半场),kick 任务的
+                # 绕球点落在门线外 → 机器人卡在 x≈7.3 反复起停,门线前散球
+                # 全部补不进(0116ec1d 的 4 次门线前 0.10-0.85m 机会全丢)。
+                goal_half = self.context.field.goal_width / 2.0
+                aim_y = clamp(ball.y * 0.5, -(goal_half - 0.2), goal_half - 0.2)
+                self.action = "attack:goal_line_shot"
+                self.kick(
+                    angle_to(ball.x, ball.y, half_l + 0.5, aim_y),
+                    SHOOT_POWER_MAX,
+                )
+                return
             if abs(ball.x) > half_l - 1.0 or abs(ball.y) > half_w - 1.0:
                 # 贴线活球:朝场中心解围。不要把球往场外踢(v1.10 的"保持距离"
                 # 分支反而让球 30s 无人触碰 → global_game_stuck；headless-04/05 实测)。
