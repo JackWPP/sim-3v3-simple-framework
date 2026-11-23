@@ -1,0 +1,57 @@
+{
+ "matchId": "60d19472-7d55-4675-a750-1bf06e21e215",
+ "durationSeconds": 682.08,
+ "frameCount": 5855,
+ "events": 257,
+ "score": {
+  "home": 0,
+  "away": 6
+ },
+ "teams": {
+  "away": {
+   "name": "群玉阁",
+   "score": 6,
+   "fouls": 3,
+   "foulsByReason": {
+    "defender_set_play_interference": 1,
+    "fallenRobot": 1,
+    "inactiveRobot": 1
+   },
+   "goals": 6,
+   "invalidGoals": 0,
+   "oobAwarded": 6,
+   "oobCaused": 12
+  },
+  "home": {
+   "name": "Robot妙妙屋",
+   "score": 0,
+   "fouls": 3,
+   "foulsByReason": {
+    "fallenRobot": 2,
+    "stopped_motion": 1
+   },
+   "goals": 0,
+   "invalidGoals": 0,
+   "oobAwarded": 12,
+   "oobCaused": 6
+  }
+ },
+ "winner": "away",
+ "coordination": {
+  "home": {
+   "frames": 5854,
+   "avg_pair_dist_m": 4.31,
+   "pct_min_pair_lt_1m": 19.7,
+   "pct_two_within_1_5m_ball": 11.1,
+   "avg_nearest_to_ball_m": 1.88
+  },
+  "away": {
+   "frames": 5854,
+   "avg_pair_dist_m": 6.09,
+   "pct_min_pair_lt_1m": 5.0,
+   "pct_two_within_1_5m_ball": 5.6,
+   "avg_nearest_to_ball_m": 2.98
+  },
+  "ball_in_home_half_pct": 79.4
+ }
+}

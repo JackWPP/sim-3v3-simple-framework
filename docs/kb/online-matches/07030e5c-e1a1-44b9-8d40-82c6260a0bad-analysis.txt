@@ -1,0 +1,50 @@
+{
+ "matchId": "07030e5c-e1a1-44b9-8d40-82c6260a0bad",
+ "durationSeconds": 724.104,
+ "frameCount": 6353,
+ "events": 340,
+ "score": {
+  "home": 1,
+  "away": 2
+ },
+ "teams": {
+  "away": {
+   "name": "马里奥冲压",
+   "score": 2,
+   "fouls": 0,
+   "foulsByReason": {},
+   "goals": 2,
+   "invalidGoals": 0,
+   "oobAwarded": 11,
+   "oobCaused": 21
+  },
+  "home": {
+   "name": "Robot妙妙屋",
+   "score": 1,
+   "fouls": 0,
+   "foulsByReason": {},
+   "goals": 1,
+   "invalidGoals": 0,
+   "oobAwarded": 21,
+   "oobCaused": 11
+  }
+ },
+ "winner": "away",
+ "coordination": {
+  "home": {
+   "frames": 6352,
+   "avg_pair_dist_m": 5.28,
+   "pct_min_pair_lt_1m": 9.1,
+   "pct_two_within_1_5m_ball": 6.2,
+   "avg_nearest_to_ball_m": 2.91
+  },
+  "away": {
+   "frames": 6352,
+   "avg_pair_dist_m": 2.03,
+   "pct_min_pair_lt_1m": 48.4,
+   "pct_two_within_1_5m_ball": 7.7,
+   "avg_nearest_to_ball_m": 4.5
+  },
+  "ball_in_home_half_pct": 54.1
+ }
+}

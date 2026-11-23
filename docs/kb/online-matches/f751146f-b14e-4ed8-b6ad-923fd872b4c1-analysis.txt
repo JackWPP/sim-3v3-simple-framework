@@ -1,0 +1,55 @@
+{
+ "matchId": "f751146f-b14e-4ed8-b6ad-923fd872b4c1",
+ "durationSeconds": 671.748,
+ "frameCount": 5788,
+ "events": 249,
+ "score": {
+  "home": 0,
+  "away": 6
+ },
+ "teams": {
+  "away": {
+   "name": "高考加油",
+   "score": 6,
+   "fouls": 2,
+   "foulsByReason": {
+    "fallenRobot": 1,
+    "illegalPosition": 1
+   },
+   "goals": 6,
+   "invalidGoals": 0,
+   "oobAwarded": 9,
+   "oobCaused": 7
+  },
+  "home": {
+   "name": "Robot妙妙屋",
+   "score": 0,
+   "fouls": 7,
+   "foulsByReason": {
+    "inactiveRobot": 7
+   },
+   "goals": 0,
+   "invalidGoals": 0,
+   "oobAwarded": 7,
+   "oobCaused": 9
+  }
+ },
+ "winner": "away",
+ "coordination": {
+  "home": {
+   "frames": 5788,
+   "avg_pair_dist_m": 4.0,
+   "pct_min_pair_lt_1m": 14.6,
+   "pct_two_within_1_5m_ball": 6.0,
+   "avg_nearest_to_ball_m": 2.03
+  },
+  "away": {
+   "frames": 5788,
+   "avg_pair_dist_m": 5.93,
+   "pct_min_pair_lt_1m": 7.8,
+   "pct_two_within_1_5m_ball": 4.4,
+   "avg_nearest_to_ball_m": 3.41
+  },
+  "ball_in_home_half_pct": 86.2
+ }
+}

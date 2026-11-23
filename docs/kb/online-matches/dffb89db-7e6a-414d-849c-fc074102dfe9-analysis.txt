@@ -1,0 +1,52 @@
+{
+ "matchId": "dffb89db-7e6a-414d-849c-fc074102dfe9",
+ "durationSeconds": 702.506,
+ "frameCount": 6076,
+ "events": 263,
+ "score": {
+  "home": 1,
+  "away": 1
+ },
+ "teams": {
+  "away": {
+   "name": "大魔王",
+   "score": 1,
+   "fouls": 1,
+   "foulsByReason": {
+    "illegalPosition": 1
+   },
+   "goals": 1,
+   "invalidGoals": 0,
+   "oobAwarded": 12,
+   "oobCaused": 10
+  },
+  "home": {
+   "name": "Robot妙妙屋",
+   "score": 1,
+   "fouls": 0,
+   "foulsByReason": {},
+   "goals": 1,
+   "invalidGoals": 1,
+   "oobAwarded": 10,
+   "oobCaused": 12
+  }
+ },
+ "winner": "draw",
+ "coordination": {
+  "home": {
+   "frames": 6076,
+   "avg_pair_dist_m": 4.91,
+   "pct_min_pair_lt_1m": 11.9,
+   "pct_two_within_1_5m_ball": 6.3,
+   "avg_nearest_to_ball_m": 2.71
+  },
+  "away": {
+   "frames": 6076,
+   "avg_pair_dist_m": 4.27,
+   "pct_min_pair_lt_1m": 15.7,
+   "pct_two_within_1_5m_ball": 7.7,
+   "avg_nearest_to_ball_m": 2.36
+  },
+  "ball_in_home_half_pct": 48.9
+ }
+}

@@ -1,0 +1,56 @@
+{
+ "matchId": "20c6a6cb-3399-4072-b89c-ff791740201a",
+ "durationSeconds": 721.266,
+ "frameCount": 6208,
+ "events": 353,
+ "score": {
+  "home": 1,
+  "away": 2
+ },
+ "teams": {
+  "away": {
+   "name": "w未来希望",
+   "score": 2,
+   "fouls": 10,
+   "foulsByReason": {
+    "defender_set_play_interference": 4,
+    "fallenRobot": 1,
+    "illegalPosition": 5
+   },
+   "goals": 2,
+   "invalidGoals": 1,
+   "oobAwarded": 10,
+   "oobCaused": 22
+  },
+  "home": {
+   "name": "Robot妙妙屋",
+   "score": 1,
+   "fouls": 3,
+   "foulsByReason": {
+    "stopped_motion": 3
+   },
+   "goals": 1,
+   "invalidGoals": 0,
+   "oobAwarded": 22,
+   "oobCaused": 10
+  }
+ },
+ "winner": "away",
+ "coordination": {
+  "home": {
+   "frames": 6207,
+   "avg_pair_dist_m": 5.37,
+   "pct_min_pair_lt_1m": 4.7,
+   "pct_two_within_1_5m_ball": 6.9,
+   "avg_nearest_to_ball_m": 2.31
+  },
+  "away": {
+   "frames": 6207,
+   "avg_pair_dist_m": 4.91,
+   "pct_min_pair_lt_1m": 10.1,
+   "pct_two_within_1_5m_ball": 3.4,
+   "avg_nearest_to_ball_m": 2.72
+  },
+  "ball_in_home_half_pct": 54.2
+ }
+}

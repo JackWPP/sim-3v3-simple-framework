@@ -1,0 +1,106 @@
+{
+ "code": 0,
+ "message": "Success",
+ "data": {
+  "id": "dffb89db-7e6a-414d-849c-fc074102dfe9",
+  "match_uuid": "dffb89db-7e6a-414d-849c-fc074102dfe9",
+  "home_team": {
+   "id": "af72e7c2-033d-4d1a-b17e-c5ea034ca7fb",
+   "player_id": "e60b5555-ca10-4ffc-a099-6bf925822fd2",
+   "name": "Robot妙妙屋",
+   "avatar": "https://boosterbackend-cdn.booster.tech/team%2Favatar%2F6a4610033f8544088d5ed68779e9d2d5%2F63ae820e8c2f41d9843af8500f67bb3e.png?OSSAccessKeyId=LTAI5t8VV8ULewruphhJyQwq&Expires=1795427800&Signature=4p%2BeXPkmO35L8PYBHaP4sf0Ryrw%3D",
+   "level": "bronze",
+   "level_display_name": "Bronze",
+   "arena_level_badge": {
+    "award_id": "8aee87ed-1559-4e79-8d94-73a54a37529a",
+    "badge_code": "arena_level_bronze",
+    "name": "Bronze"
+   },
+   "occupation": "student/empty",
+   "rank": 541
+  },
+  "away_team": {
+   "id": "47d6338d-293b-4328-8672-ca765fd76f90",
+   "player_id": "9c6bde33-8c55-49bc-8646-06b5100df50f",
+   "name": "大魔王",
+   "avatar": "https://boosterbackend-cdn.booster.tech/player%2Favatar%2F71762e8a1c3a445f93c0de6e7db27281%2F3c5e15b7d65a4e579a70f9ff7d7a081f.jpg?OSSAccessKeyId=LTAI5t8VV8ULewruphhJyQwq&Expires=1795427800&Signature=9jobBxj5yNnQmxGPEex0V%2B1OOEY%3D",
+   "level": "bronze",
+   "level_display_name": "Bronze",
+   "arena_level_badge": {
+    "award_id": "d7b07e8b-1df1-4960-8718-122b26072db4",
+    "badge_code": "arena_level_bronze",
+    "name": "Bronze"
+   },
+   "occupation": "student/primary",
+   "rank": 529
+  },
+  "opponent_kind": "TEAM",
+  "scheduled_at": "2026-11-23T08:43:45Z",
+  "live_url": {},
+  "season": null,
+  "stage": null,
+  "round": null,
+  "group": null,
+  "arena": {
+   "code": "3v3",
+   "name": "Arena",
+   "competition_type_code": "3v3"
+  },
+  "state": "finished",
+  "result": {
+   "home_score": 1,
+   "away_score": 1,
+   "home_fouls": 0,
+   "away_fouls": 1,
+   "winner": "draw",
+   "finished_at": "2026-11-23T08:56:08Z"
+  },
+  "perspective": null,
+  "match_type": "arena",
+  "competition_type_code": "3v3",
+  "challenge_uuid": "6605bd1e-bbfc-4a43-8f56-599ee3c63ad4",
+  "created_at": "2026-11-23T08:43:45Z",
+  "home_score": 1,
+  "away_score": 1,
+  "queue": {
+   "queue_position": 0,
+   "available_instances": 0,
+   "match_duration_seconds": 600,
+   "estimated_wait_seconds": 0,
+   "eta_seconds": 0
+  },
+  "counted": true,
+  "points": {
+   "type": "arena_rating",
+   "settled": true,
+   "home": {
+    "before": 1156,
+    "after": 1161,
+    "delta": 5
+   },
+   "away": {
+    "before": 1206,
+    "after": 1194,
+    "delta": -12
+   }
+  },
+  "realtime_replay": {
+   "match_uuid": "dffb89db-7e6a-414d-849c-fc074102dfe9",
+   "format": "segments",
+   "execution_id": "a817a847-7922-443f-a4a0-40e88d72d0b2",
+   "attempt": 1,
+   "run_id": "c40be58d-767c-4c6f-b734-79e251624e85",
+   "match_state": "finished",
+   "publish_state": "finished",
+   "available": true,
+   "zip_ready": true,
+   "manifest_url": "https://boosterbackend-cdn.booster.tech/replays/live/self-hosted/dffb89db-7e6a-414d-849c-fc074102dfe9/attempt-1/c40be58d-767c-4c6f-b734-79e251624e85/final.json",
+   "manifest_etag": "E7C1B0B04B1D973684FD14A0D434F796",
+   "enabled": true,
+   "buffer_segments": 2,
+   "segment_seconds": 10.0,
+   "poll_interval_ms": 2000
+  }
+ },
+ "request_id": "3883a9e75759439bb3fb7c6d4393cb43"
+}
