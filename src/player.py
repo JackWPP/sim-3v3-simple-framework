@@ -1048,11 +1048,23 @@ class Player:
                 and ball.x < 0.5
                 and ball_speed < KEEPER_CLEAR_MAX_BALL_SPEED_MPS
             ):
-                # v2.7:解围方向固定朝对方半场(禁止朝己方门);仍带 y 校准,
-                # 让球踢向中路而不是边线。
-                clear_dir = angle_to(
-                    ball.x, ball.y, half_l * 0.6, clamp(ball.y * 0.3, -2.0, 2.0)
-                )
+                # v2.7:解围方向固定朝对方半场(禁止朝己方门)。
+                # v2.24(第17场 G1):解围方向避开最近对手——原固定朝中路
+                # (half_l*0.6, y*0.3) 曾以 3.71m/s 直送对方 r4 脚下被二次进攻。
+                half_w = ctx.field.width / 2.0
+                aim_y = clamp(ball.y * 0.3, -2.0, 2.0)
+                nearest_opp = None
+                nearest_d = math.inf
+                for opp in (ctx.opponents or {}).values():
+                    if opp.pose is None:
+                        continue
+                    dd = math.hypot(opp.pose.x - ball.x, opp.pose.y - ball.y)
+                    if dd < nearest_d:
+                        nearest_d, nearest_opp = dd, opp
+                if nearest_opp is not None and nearest_d < 6.0:
+                    side = 1.0 if nearest_opp.pose.y <= ball.y else -1.0
+                    aim_y = side * (half_w - 1.2)
+                clear_dir = angle_to(ball.x, ball.y, half_l * 0.6, aim_y)
                 self.action = "guard:clear"
                 self._clear_kick_started = ctx.now
                 self._clear_ball_xy = (ball.x, ball.y)
