@@ -416,3 +416,20 @@ TOUCHLINE_GUARD_M = 0.7        # |ball.y| > half_w - 0.7 视为贴边线
 TOUCHLINE_APPROACH_M = 0.55    # 从场内一侧接近的偏移(站在球内侧)
 TOUCHLINE_KICK_DIST_M = 0.65   # 距球 ≤0.65m 才起脚
 TOUCHLINE_RETREAT_M = 2.0      # 踢完朝场内退的距离
+
+# v2.26(analyst 进球解剖/Lead m03386): 前场抢射分支——我们近 3 场 30 射 0 次
+# <8m、禁区触球 6/0/0,胜局 6 球全是「距门 4.0-9.4m 一触终结」,需主动进前场抢射。
+FRONT_SNAP_BALL_X = 0.8              # 球过中线(本队视角 +x)才触发
+FRONT_SNAP_GOAL_DIST_M = 9.0         # 距对方门 ≤9m
+FRONT_SNAP_BALL_SPEED_MPS = 0.8      # 球速 <0.8(慢球/停球)才抢射
+FRONT_SNAP_CONTACT_M = 0.55          # 距球 ≤0.55m 直接射
+FRONT_SNAP_SPEED_MPS = 1.6           # 直冲速度(omni)
+FRONT_SNAP_CORNER_INSET_M = 0.35     # 瞄远角(goal_half-inset)
+# v2.26(analyst 第25场 ①): 贴线球收口——只有「确实即将出界」才退场;
+# 活球/贴线静止球照常抢触;活球贴线静止 >3s 强制最近者触球(防 53.8s 无人触)。
+TOUCHLINE_EXIT_MARGIN_M = 0.35       # |y| > half_w-0.35 且向外滚才算将出界
+TOUCHLINE_STALL_S = 3.0
+TOUCHLINE_STALL_SPEED_MPS = 0.15
+# v2.26(analyst 第25场 ③): 定位球主罚中距离绕内侧(avoid_ball=True),避免身体顶球出线。
+SET_PLAY_TAKER_INNER_M = 0.9
+SET_PLAY_TAKER_INNER_OFFSET_M = 0.35

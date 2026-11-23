@@ -119,6 +119,9 @@ class Player:
         self._goal_line_push: bool = False
         # v2.25: 贴边线球「踢完朝场内退」的撤退目标(None=未触发)
         self._touchline_retreat: tuple[float, float] | None = None
+        # v2.26: 贴线活球静止计时 + 上一帧球位(算球速,判断是否向外滚)
+        self._touchline_still_since: float | None = None
+        self._touch_ball_prev: tuple[float, float, float] | None = None
         # v2.17: 门将过线点预测用的球速差分缓存;解围卡死自恢复计时。
         self._ball_prev: tuple[float, float, float] | None = None
         self._clear_kick_started: float | None = None
@@ -849,15 +852,68 @@ class Player:
             )
             return
 
-        # v2.25(Lead m03269 ②/analyst 第23场): 贴边线球从场内一侧接近、朝场内
-        # 踢,踢完立刻朝场内退 2.0m。第23场 480.9: 我方在边线 y≈4.5 碰球出界后
-        # 留在出界点,裁判 3s 后把对方 throw_in 摆到脚下 0.25m(<接触半径),
-        # stopped 期 crawl 0.02m/s 逃不出 → R-06。注意不能全员远离活球(30s
-        # game_stuck):本分支始终会接近并起脚,只是踢完先退场再回位。
+        # v2.25/v2.26(Lead m03269/m03386, analyst 第23/25场): 贴线球与前场抢射。
+        # 先用跨帧球位算球速: 前场抢射/贴线是否「向外滚」都依赖它。
+        now = self.context.now if self.context is not None else 0.0
+        prev = self._touch_ball_prev
+        vel = None
+        if prev is not None:
+            dt = now - prev[2]
+            if 1e-3 < dt <= 0.5:
+                vel = ((ball.x - prev[0]) / dt, (ball.y - prev[1]) / dt)
+        self._touch_ball_prev = (ball.x, ball.y, now)
+        speed = math.hypot(vel[0], vel[1]) if vel is not None else None
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
+        half_l = self.context.field.length / 2.0
+        half_w = self.context.field.width / 2.0
+        goal_half = self.context.field.goal_width / 2.0
+
+        # v2.26(analyst 进球解剖): 前场抢射——球已过中线、距对方门 ≤9m、慢球时
+        # 直接 omni 冲球并一脚射远角。我们近 3 场 30 射 0 次 <8m,胜局进球全是
+        # 距门 4.0-9.4m 的一触终结,必须先制造这类机会。
+        if ball.x > FRONT_SNAP_BALL_X:
+            dist_goal = dist(ball.x, ball.y, half_l, 0.0)
+            if dist_goal <= FRONT_SNAP_GOAL_DIST_M and (
+                speed is None or speed < FRONT_SNAP_BALL_SPEED_MPS
+            ):
+                if d <= FRONT_SNAP_CONTACT_M:
+                    side = 1.0 if ball.y >= 0.0 else -1.0
+                    aim_y = -side * max(goal_half - FRONT_SNAP_CORNER_INSET_M, 0.0)
+                    self.action = "attack:front_snap"
+                    self.kick(
+                        angle_to(ball.x, ball.y, half_l + 0.5, aim_y),
+                        SHOOT_POWER_MAX,
+                    )
+                else:
+                    self.action = "attack:front_chase"
+                    self.omni_move_toward(
+                        (ball.x, ball.y), speed=FRONT_SNAP_SPEED_MPS
+                    )
+                return
+
+        # v2.26(analyst 第25场 ①): 贴线球收口。旧 v2.25 分支只要 |y|>half_w-0.7
+        # 就「从内侧接近→踢→退场」,造成活球 53.8s 无人触/0.35m 仍 retreat 的回归。
+        # 现在只有「球确实即将出界」(|y|>half_w-0.35 且向外滚)才退场;活球/静止
+        # 球照常抢触;活球贴线静止 >3s 强制最近者触球。
         if abs(ball.y) > half_w - TOUCHLINE_GUARD_M:
             inward = -1.0 if ball.y > 0.0 else 1.0
-            if self._touchline_retreat is not None:
+            outward = vel is not None and inward * vel[1] < -0.15
+            truly_leaving = (
+                abs(ball.y) > half_w - TOUCHLINE_EXIT_MARGIN_M and outward
+            )
+            still = speed is not None and speed < TOUCHLINE_STALL_SPEED_MPS
+            if still:
+                if self._touchline_still_since is None:
+                    self._touchline_still_since = now
+            else:
+                self._touchline_still_since = None
+            stalled = (
+                self._touchline_still_since is not None
+                and now - self._touchline_still_since >= TOUCHLINE_STALL_S
+            )
+            if not truly_leaving:
+                self._touchline_retreat = None
+            if self._touchline_retreat is not None and not stalled:
                 rx, ry = self._touchline_retreat
                 if math.hypot(self.pose.x - rx, self.pose.y - ry) < 0.4:
                     self._touchline_retreat = None
@@ -886,10 +942,11 @@ class Player:
             aim_y = ball.y + inward * 2.5
             self.action = "attack:touchline_clear"
             self.kick(angle_to(ball.x, ball.y, aim_x, aim_y), KICK_POWER_CLEAR)
-            self._touchline_retreat = (
-                clamp(ball.x + (0.5 if ball.x < 0.0 else -0.5), -half_l + 1.5, half_l - 1.5),
-                clamp(ball.y + inward * TOUCHLINE_RETREAT_M, -half_w + 1.2, half_w - 1.2),
-            )
+            if truly_leaving:
+                self._touchline_retreat = (
+                    clamp(ball.x + (0.5 if ball.x < 0.0 else -0.5), -half_l + 1.5, half_l - 1.5),
+                    clamp(ball.y + inward * TOUCHLINE_RETREAT_M, -half_w + 1.2, half_w - 1.2),
+                )
             return
 
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)

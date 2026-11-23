@@ -925,7 +925,8 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
 
     kick_dir, power = _set_play_kick_plan(context, set_play, ball, taker.id, active_ids)
     taker.action = f"setplay:{set_play.value}"
-    if dist(taker.pose.x, taker.pose.y, ball.x, ball.y) > SET_PLAY_NEAR_BALL_M:
+    d_taker_ball = dist(taker.pose.x, taker.pose.y, ball.x, ball.y)
+    if d_taker_ball > SET_PLAY_NEAR_BALL_M:
         # 先绕到球的"踢球侧"(贴边线时会被夹进场内,足够接近后下一帧直接踢)。
         approach = _field_point(
             context,
@@ -933,9 +934,22 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             ball.y - math.sin(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
             0.3,  # v2.15:绕行目标留 0.3m 场内余量(analyst 提醒)
         )
-        # v2.14:avoid_ball=False(analyst+Lead:绕开球会让主罚多绕 1-2s 才触球,
-        # 线上第 7 场定位球首触中位 12.2s;接近点已缩到 0.5m,直接走向球更稳)。
-        taker.walk_to(approach, face=kick_dir, avoid_ball=False)
+        # v2.26(analyst 第25场 ③): avoid_ball=True 绕开球走,避免身体把球顶出线
+        # (第25场 427.5-428.15s: taker 绕后时把球顶出边线→留在摆位点→R-06)。
+        taker.walk_to(approach, face=kick_dir, avoid_ball=True)
+    elif d_taker_ball > SET_PLAY_TAKER_INNER_M:
+        # v2.26: 中距离(0.9-2.2m)也先绕到球内侧再踢,别直线撞球。
+        ix, iy = 0.0, 0.0
+        norm = math.hypot(ball.x, ball.y)
+        if norm > 1e-6:
+            ix, iy = -ball.x / norm, -ball.y / norm  # 球→场地中心方向
+        approach = _field_point(
+            context,
+            ball.x + ix * SET_PLAY_TAKER_INNER_OFFSET_M,
+            ball.y + iy * SET_PLAY_TAKER_INNER_OFFSET_M,
+            0.3,
+        )
+        taker.walk_to(approach, face=kick_dir, avoid_ball=True)
     else:
         taker.kick(kick_dir, power)
 
