@@ -89,6 +89,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | 11_8342（白银，1237，4胜0平5负） | **1:1 平** | 0 | **v2.17**（ver23，sha 2bd91087…）：我方进球 sim212.58、失球 sim703.46、另一球被判 goal_disallowed_indirect（sim579.79）；双方 0 retake；home min_pair 15.1%、ball 半场 57.9%；oob 19 caused；rating 1179→1182（+3）、对方 1237→1229（-8）；对方 4 罚全 fallenRobot（无 0 人期）→ **有效（Lead 裁定）** |
 | 11-23 | FREE_BATTLE | 高考加油（白银，1276，1胜0平4负） | **1:3 负** | 1（inactiveRobot robot3@sim485.2，ballDistance 0.47m） | **v2.17**（ver23，sha 2bd91087…）：我方进球 sim319.79、失球 sim51.6/419.17/574.14；retake 0；min_pair 6.9%、ball 半场 42.5%；rating 1182→1166（−16）、对方 1276→1326（+50）；有效局 10/10 达成 |
 | 11-23 | FREE_BATTLE | WY（未定级，1182，0胜0平3负） | **2:5 负** | 0（对方 1 defender_set_play_interference） | **v2.20**（ver24，sha 9a4e6287…）：我方进球 sim56.5/582.9、失球 sim217.6/324.0/471.9/622.5/675.4；retake 1；min_pair 9.3%、ball 半场 61.8%；rating 1166→1147（−19）、对方 1182→1267；10/10 已达成后的加测场 |
+| 11-23 | FREE_BATTLE | RayenFCB（未定级，1245，0胜0平2负） | **0:5 负** | 0（对方 0） | **v2.21**（ver25，sha 7d23aee3…）：失球 sim105.3/161.7/200.9/368.3/637.9、对方 1 球被吹 indirect；retake 2；min_pair 10.3%、avg_nearest 2.01m；rating 1147→1132（−15）、对方 1245→1316；加测场 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
