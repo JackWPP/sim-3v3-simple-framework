@@ -99,6 +99,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-24 | FREE_BATTLE | 马里奥冲压（1266） | **0:1 负** | 5（3×R-06 robot2 + fallenRobot + R-07） | **v2.23b**（ver30）：失球 sim759.7、对方 2 球被吹 indirect；retake 10；ball 半场 75.1%；rating 1076→1066（−10）；基线场 3/3；v2.25 修 #22 贴线外踢 + 贴线球退场 |
 | 11-24 | FREE_BATTLE | 11_8342（1262） | **0:1 负** | 1（R-06 robot1@sim433.1） | **v2.25**（ver31）：失球 sim751.9、对方 1 球被吹 indirect；retake 7→**2**、R-06 3→1；ball 半场 74.3%、oob caused 26、0 进球；rating 1066→1056（−10）；小样本 1/3 |
 | 11-24 | FREE_BATTLE | Diego y la gente（1069） | **3:0 胜** | 0 | **v2.25**（ver31）：我方 0 罚/对方 0、0 retake；rating 1056→1074（+18）；小样本 2/3（1 胜 1 负）；归档待补 |
+| 11-24 | FREE_BATTLE | 句号（1106） | **1:4 负** | 0 | **v2.26**（ver32）：我方 0 罚/0 retake、对方 2 罚；失球 sim89.7/151.5/311.5/660.1、进球 sim556.9；ball 半场 69.7%、oob 11/11、min_pair 19.8%；rating 1074→1057（−17）；小样本 1/3 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
