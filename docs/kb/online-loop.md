@@ -86,6 +86,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | Micky-Rex（青铜，1078） | **4:5 负** | 0（双方 0 罚） | **v2.15**（ver21，sha f51b3690…）：4:2 领先到 367s 后连丢 3 球（sim 403/589/643.7 终场前 14s 绝杀）被逆转；retake 0、disallowed 0；avg_pair 4.34、min_pair<1m 10.0%、ball_in_home_half 48.8%、oob caused 7；5678 帧、66 段 sha 66/66；评分 1158→1128；clean 场但输弱队 → 下一轮重心转防守 |
 | 11-23 | FREE_BATTLE | GEN.G_Sendi（青铜，1155） | **3:0 胜** | 1（fallenRobot robot2@sim604.9，对方半场倒地 10s，无关） | **v2.16**（ver22，sha a0e3f246…）：六项静态修法（orbit 3.1m+微摆、先径向拉出、门线补射去 pose 限制、角旗过滤、切向撤离、双段撤离）+失球后 3s 防守线+门将解围不追；**单场失球 0**、ball 半场 12.0%、rating 1128→1155；有效 7/10 | 待补 |
 | 11-23 | FREE_BATTLE | 句号（青铜，1166） | **3:1 胜** | 3（fallenRobot×3：robot3@467.6/robot2@488.3/robot2@617.3） | **v2.16**（ver22）：我方 3 球（sim 106.5/240.4/645.5）、失球 490.4；retake 4；ball 半场 16.8%；rating 1155→1179；对方 7 罚（4 倒地+2 摆球干扰+1 出界，无 0 人期）→ **有效**（Lead 裁定，新过滤规则） | 待补 |
+| 11-23 | FREE_BATTLE | 11_8342（白银，1237，4胜0平5负） | **1:1 平** | 0 | **v2.17**（ver23，sha 2bd91087…）：我方进球 sim212.58、失球 sim703.46、另一球被判 goal_disallowed_indirect（sim579.79）；双方 0 retake；home min_pair 15.1%、ball 半场 57.9%；oob 19 caused；rating 1179→1182（+3）、对方 1237→1229（-8）；对方 4 罚全 fallenRobot（无 0 人期）→ 待裁定有效性 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 

@@ -299,6 +299,9 @@ KEEPER_PREDICT_MAX_TIME_S = 3.0   # 预测时域上限
 # 出击解围后 0.8s 内球位移 <0.2m → 判定 kick 卡死,release_kick 回门线。
 KEEPER_CLEAR_TIMEOUT_S = 0.8
 KEEPER_CLEAR_STALL_M = 0.2
+# v2.18(analyst P0-2 补全): 只对慢球解围(球速>=0.6m/s 说明射门/快传,门将应先站位);
+# 球在身后(ball.x<pose.x)不 kick,避免绕到球后把门线让空。
+KEEPER_CLEAR_MAX_BALL_SPEED_MPS = 0.6
 
 # v2.2:对方定位球摆球期间的撤离节奏。
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
