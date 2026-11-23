@@ -69,7 +69,8 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-22 | OFFICIAL 资格赛 | AI | 1:0 胜 | 1 罚 | v1.14 通过资格赛 |
 | 11-22 | FREE_BATTLE | 好好吃饭 | 1:2 负 | 2 罚 | v1.14；被最后一分钟绝杀 |
 | 11-23 | FREE_BATTLE | 宋明晖（白银 #508） | **3:3 平** | 1 罚（inactiveRobot robot2） | v2.0 协同首战；评分 1171 |
-| 11-23 | FREE_BATTLE | 阿白（未定级 1242） | 待定 | — | v2.1 |
+| 11-23 | FREE_BATTLE | 阿白（白银，1242） | 0:4 负 | 2（illegalPosition/free_kick_avoidance） | v2.1；门将避球 bug 导致 4 球全失 |
+| 11-23 | FREE_BATTLE | 地表最强（白银，1209） | **4:0 胜** | 0 | v2.2；4 球（211/346/536/636s），对手 9 罚；积分 1171→1196 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
@@ -96,3 +97,16 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
   - 支援：球进对方三区（x>2.5）改为「拖后接应」（球后 2.6m、横向 2.0m），不再前插到角旗；任何支援点强制距球 >=3.15m，并在球靠近时小幅摆动防 inactiveRobot。
   - 射门：瞄准点从门柱内侧 0.35m 收到 0.45m，力度上限 8.0→7.5，减少打飞/出底线。
   - `online_submit.py` 修复 filename 必须以 `.agent` 结尾。
+
+## 9. 线上迭代记录（v2.0 → v2.2）
+
+| 版本 | 对手 | 比分 | 我方罚单 | 对手罚单 | 关键指标（我方） |
+|---|---|---|---|---|---|
+| v2.0（首战） | 宋明晖（白银 #508） | 3:3 平 | 1（inactiveRobot） | 0 | avg_pair 4.69m；min_pair<1m 12.2%；2 台<1.5m 球 11.4%；avg_nearest 2.33m；球在己方半场 47% |
+| v2.1 | 阿白（白银 1242） | 0:4 负 | 2（free_kick_avoidance 0.44m；另一次定位球） | 1 | avg_pair 5.39m；min_pair<1m 7.9%；2 台<1.5m 球 4.1%；avg_nearest 2.19m；球在己方半场 49.1% |
+| v2.2 | 地表最强（白银 1209） | **4:0 胜** | **0** | **9**（7×free_kick_avoidance + 2×其他） | avg_pair 5.02m；min_pair<1m 13.4%；2 台<1.5m 球 6.3%；avg_nearest 3.04m；球在己方半场 **30.1%** |
+
+- v2.1 复盘：协同指标继续改善（挤球 4.1%），但**门将避球 bug**（`walk_to(avoid_ball=True)` 让门将目标点≈球坐标时被斥力推开）导致 4 个失球全部是球横穿门线时门将 y 差 0.37~1.50m；同时我方在对方 throwIn 时距球 0.44m 吃 R-07。
+- v2.2 修复：门将 `avoid_ball=False`；球进 `KEEPER_CLEAR_RADIUS_M=1.35` 且开放球权时踢走解围；球更深时贴门线站位（inset 0.1m）；对方定位球摆球期先快撤（1.2s 内 2.0m/s）再以 0.12m/s 爬出 1.45m 风险圈（低于裁判 0.15m/s 漂移阈值，不吃 M-02）。
+- v2.2 效果：4:0、0 罚单、对手 9 罚（其 restart 干扰）；球在己方半场时间从 49% 降到 30%，反击/推进明显；
+- 下一轮方向（v2.3）：①我方 avg_nearest_to_ball 3.04m 偏高 → primary 更积极上抢/压迫（但要保留 support 距离）；②进攻转化：4 球但射门次数/触球分布需看 frames；③set-play pass 偶发 retake（我方 throw-in 被 retake 3 次）需让第一脚更稳（目标点远离边线、力度更小）。
