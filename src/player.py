@@ -942,9 +942,11 @@ class Player:
                 cover_lim = KEEPER_TRACK_Y_LIMIT_FAR
             cover_y = clamp(ball.y * cover_gain, -cover_lim, cover_lim)
             # v2.17: 朝我方门快速滚动的球按「过线点」跟随(球横传/折射时 y 跟对)。
+            # v2.20(analyst 第14场): 去掉「球在己方半场」门控——对方在己方半场
+            # 起脚的长射(第14场 sim51.6 从 x=4.5 起脚 12.27m 入网)也应预测过线点,
+            # 否则门将不横移(dy1.22)被穿。t_cross 上限 2.0、目标 y clamp ±1.15。
             if (
-                ball.x < 0.0
-                and ball_vel is not None
+                ball_vel is not None
                 and math.hypot(ball_vel[0], ball_vel[1])
                 >= KEEPER_PREDICT_MIN_SPEED_MPS
                 and ball_vel[0] < KEEPER_PREDICT_MIN_VX
@@ -952,7 +954,7 @@ class Player:
                 t_cross = (-half_l - ball.x) / ball_vel[0]
                 if 0.0 < t_cross <= KEEPER_PREDICT_MAX_TIME_S:
                     cover_y = clamp(
-                        ball.y + ball_vel[1] * t_cross, -cover_lim, cover_lim
+                        ball.y + ball_vel[1] * t_cross, -1.15, 1.15
                     )
             home = (home[0], cover_y)
 

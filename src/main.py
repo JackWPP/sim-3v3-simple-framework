@@ -382,6 +382,10 @@ def _set_play_kick_plan(
             d = dist(ball.x, ball.y, mate_state.pose.x, mate_state.pose.y)
             if d <= 0.8 or d >= best:
                 continue
+            # v2.20(analyst 第14场): 第一脚限距 5m——过远会被裁判视为「未完成
+            # 二次触球」的间接球场景(551s 界外球 10.2m 直送对方半场,进球被吹)。
+            if d > SET_PLAY_PASS_MAX_DIST_M:
+                continue
             # v2.3:落点里收、避边线至少 1.2m,y 向中路拉,降低第一脚出界 retake。
             tx = clamp(mate_state.pose.x, -half_length + 1.2, half_length - 1.2)
             ty = mate_state.pose.y
