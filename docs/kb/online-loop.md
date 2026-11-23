@@ -94,6 +94,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | 火花骑士可莉（未定级，1163，0胜1平3负） | **0:5 负** | 0（对方 0） | **v2.17-rollback**（ver27，sha 7287ffb9…）：回退验证场；失球 sim77.7/261.6/302.6/406.9/581.1，对方 2 球被吹 indirect；min_pair 12.6%、ball 半场 69.7%、oob 12/12；rating 1112→1095（−17）；回退未逆转 → 停在 10/10 有效局里程碑 |
 | 11-24 | FREE_BATTLE | 蓝色禁区1（青铜，1069，1胜0平14负） | **6:0 胜** | 1（fallenRobot@sim269.7，upDot −0.357） | **v2.23**（ver28，sha 3ecac51f…）：我方进球 sim72.4/131.9/259.2/341.6/458.2/599.2；0 失球；min_pair 17.7%、ball 半场 8.7%、oob caused 0；rating 1095→1114（+19）；**analyst 判无效**（对方三台整场冻结场外 y=−5、0 触球） |
 | 11-24 | FREE_BATTLE | 啊对对队（未定级，1194，0胜0平2负） | **0:3 负** | 1（R-06 defender_set_play_interference robot1@sim232.3，+对方 retake） | **v2.24**（ver29，sha 880481d0…）：失球 sim54.4/153.3/535.4、对方 1 球被吹 own_free_kick；retake unconfirmed_set_play_ball_out@228.3；min_pair 12.3%、ball 半场 51.8%；rating 1114→1100（−14）；v2.24 首战未达预期 → 回滚 v2.23b |
+| 11-24 | FREE_BATTLE | 大魔王（未定级，1260，1胜2平5负） | **0:5 负** | 1（fallenRobot robot3@509.0，对方 5 罚） | **v2.23b**（ver30，sha f731f048…）：失球 sim78.5/148.7/274.1/605.8/678.6；对方 5 次定位球犯规送 5 retake 未转化；min_pair 15.8%、ball 半场 72.8%；rating 1100→1088（−12）；v2.23b 基线场 1/3 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
