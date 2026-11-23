@@ -680,9 +680,6 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
                 if elapsed <= STOP_VACATE_WINDOW_S:
                     p.action = "stopped:vacate"
                     p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
-                else:
-                    p.action = "stopped:crawl"
-                    p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
                 continue
         p.action = "stopped"
         p.stop()

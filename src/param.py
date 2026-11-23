@@ -228,7 +228,7 @@ KEEPER_TRACK_Y_LIMIT_FAR = 0.8
 # (前插会被边线 clamp 后停在对方角旗附近,10s 不动吃 inactiveRobot 罚单)。
 SUPPORT_TRAIL_M = 2.6
 SUPPORT_TRAIL_LATERAL_M = 2.0
-SUPPORT_OFFENSE_X = 0.8
+SUPPORT_OFFENSE_X = 1.5
 SUPPORT_MIN_BALL_SAFE_M = 3.15
 # 射门收敛:瞄得更靠门内(0.45),上限力度 7.5,减少打飞/打偏出底线。
 SHOOT_POWER_MAX = 7.5     # 射门力度上限(降低打飞出底线概率)
@@ -245,6 +245,6 @@ KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
 # 因此:先快撤(1.2s 内),之后若还没到安全距离,以 0.12m/s(低于 0.15 漂移阈值)
 # 慢慢爬出 1.45m 风险圈,既不吃 M-02 也能满足 R-07。
-STOP_VACATE_WINDOW_S = 1.2
-STOP_VACATE_SPEED = 2.0
-STOP_CRAWL_SPEED = 0.12
+STOP_VACATE_WINDOW_S = 0.6
+STOP_VACATE_SPEED = 1.5
+STOP_CRAWL_SPEED = 0.0
