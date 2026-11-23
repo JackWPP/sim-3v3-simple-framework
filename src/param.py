@@ -158,6 +158,16 @@ SUPPORT_DEF_LATERAL_M = 1.5    # 防守支援的横向偏移
 SET_PLAY_NEAR_BALL_M = 2.2
 # 我方定位球：接应队员前插距离。
 SET_PLAY_RECEIVER_AHEAD_M = 3.5
+# v2.6:主罚选择改为「到球后方接近点最近」者,接近点=ball-kick_dir*该距离(m),
+# 阶段内保留原主罚的额外宽容距离(m),避免贴边线球绕不过来/首触慢。
+SET_PLAY_TAKER_APPROACH_M = 1.0
+SET_PLAY_TAKER_KEEP_MARGIN_M = 0.6
+# v2.6:二次触球定位球的短传力度按距离插值,不再固定 3.6;
+# 线上 20c6a6cb 第 1 球就是固定力度短传被罚下队友、落点朝己门滚 8.2m 乌龙。
+SET_PLAY_PASS_POWER_BASE = 3.0
+SET_PLAY_PASS_POWER_PER_M = 0.25
+SET_PLAY_PASS_POWER_MIN = 3.0
+SET_PLAY_PASS_POWER_MAX = 4.5
 
 # ======================================================================
 # 站位 / 避让
@@ -243,8 +253,13 @@ KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
 
 # v2.2:对方定位球摆球期间的撤离节奏。
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
-# 因此:先快撤(1.2s 内),之后若还没到安全距离,以 0.12m/s(低于 0.15 漂移阈值)
-# 慢慢爬出 1.45m 风险圈,既不吃 M-02 也能满足 R-07。
-STOP_VACATE_WINDOW_S = 0.6
-STOP_VACATE_SPEED = 1.5
+# v2.6:线上 20c6a6cb 3 次 stopped_motion(sim 204/521/670s,位移 0.301-0.330m)全部
+# 发生在对方 throwIn 摆球期:根因是窗口结束后只 continue、不发零速度,残留的
+# 1.5m/s 指令让机器人继续滑行过阈值。改为窗口 0.6→0.35、速度 1.5→1.0,
+# 并在窗口结束后对所有人显式 p.stop()(见 main._act_stopped)。
+STOP_VACATE_WINDOW_S = 0.35
+STOP_VACATE_SPEED = 1.0
+# v2.6:GameControl 状态发布有 0~0.5s 延迟,记录 stopped_since 时回拨该补偿,
+# 让宽限窗口对齐裁判的真实计时点(否则宽限整体右移、刹车指令发晚)。
+STOP_STATE_LATENCY_COMP_S = 0.35
 STOP_CRAWL_SPEED = 0.0

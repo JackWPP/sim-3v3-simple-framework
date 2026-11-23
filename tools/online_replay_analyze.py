@@ -20,12 +20,21 @@ import sys
 
 def load_frames(seg_dir: str):
     frames = []
+    skipped = 0
     for path in sorted(glob.glob(os.path.join(seg_dir, "*.jsonl.gz"))):
         with gzip.open(path, "rt") as fd:
             for line in fd:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     frames.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # 线上 live replay 偶发半帧损坏(首个 segment 里一行是前半帧的残尾)。
+                    # 跳过坏行即可，其余帧仍是完整的 10Hz 轨迹。
+                    skipped += 1
+    if skipped:
+        print(f"[warn] skipped {skipped} malformed frame line(s)", file=sys.stderr)
     return frames
 
 

@@ -73,7 +73,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | 地表最强（白银，1209） | **4:0 胜** | 0 | v2.2；4 球（211/346/536/636s），对手 9 罚；积分 1171→1196 |
 | 11-23 | FREE_BATTLE | 瘤子牢孟（1135） | **4:1 胜** | 6（2×stopped_motion 0.31m + 4×fallenRobot） | v2.3；4 球（44/81/112/277s），对手 6 罚；support 前压导致挤球率回升到 19.6% |
 | 11-23 | FREE_BATTLE | Adam Hariz_0997（1338） | 0:5 负 | 0 | v2.4；对手更强（1338），5 球全从门前被横穿，keeper 角色在深位机器人间切换 |
-| 11-23 | FREE_BATTLE | 待定 | 待定 | — | **v2.5**（门将角色粘滞 + 门线全跟随，已提交 version 10） |
+| 11-23 | FREE_BATTLE | w未来希望（青铜，1141） | 1:2 负 | 3（3×stopped_motion：0.301/0.303/0.330m，均为对方定位球摆球期快撤残留速度） | **v2.5**；我方 466.6s 进球、230.8s/713.0s 失球（终场前 8.5s 绝杀）；min_pair<1m 4.7%（历次最好）；ball_in_home_half 54.2%；11 次 set_play_retake 全在我方定位球（对方 10 罚）；评分 1209→1156 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
