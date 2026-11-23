@@ -72,7 +72,8 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-23 | FREE_BATTLE | 阿白（白银，1242） | 0:4 负 | 2（illegalPosition/free_kick_avoidance） | v2.1；门将避球 bug 导致 4 球全失 |
 | 11-23 | FREE_BATTLE | 地表最强（白银，1209） | **4:0 胜** | 0 | v2.2；4 球（211/346/536/636s），对手 9 罚；积分 1171→1196 |
 | 11-23 | FREE_BATTLE | 瘤子牢孟（1135） | **4:1 胜** | 6（2×stopped_motion 0.31m + 4×fallenRobot） | v2.3；4 球（44/81/112/277s），对手 6 罚；support 前压导致挤球率回升到 19.6% |
-| 11-23 | FREE_BATTLE | Adam Hariz_0997（1338） | 待定 | — | v2.4（停止期不再爬行、support 前压回调） |
+| 11-23 | FREE_BATTLE | Adam Hariz_0997（1338） | 0:5 负 | 0 | v2.4；对手更强（1338），5 球全从门前被横穿，keeper 角色在深位机器人间切换 |
+| 11-23 | FREE_BATTLE | 待定 | 待定 | — | **v2.5**（门将角色粘滞 + 门线全跟随，已提交 version 10） |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
@@ -124,3 +125,14 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
   - SUPPORT_OFFENSE_X 0.8→1.5（前压回调，减少挤球）；
   - 保留 v2.3 的定位球安全落点。
 - 仍待解决：fallenRobot（摔倒后起身失败，10s 罚）——属于框架/物理层，策略侧只能减少碰撞/倒地（后续可加「避免与对手贴身冲撞」的进攻路线选择）。
+
+## 11. v2.4 → v2.5
+
+- v2.4（0:5 负 Adam Hariz_0997，rating 1338）：
+  - 0 罚单、2 次 goal_disallowed_indirect（我方定位球直接进球无效，符合二次触球规则）；
+  - 5 个失球继续是门前被横穿：复盘中门将 y 与球门线穿越点差 0.18~1.0m，另有门将跑到 x=-7.35（球门线后方）→ 门将角色在两台深位机器人之间**反复切换**，两人互相推挤、门线出现空档；
+  - 说明：v2.2 的 avoid_ball 修复有效，但深位队友挤占门将站位使 keeper 选择不稳定。
+- v2.5 修复（version 10，提交未对战）：
+  - `_act_normal`：门将角色**粘滞**（store.normal_keeper；上一帧门将仍在且离门不超过最优者 +1.5m 就保留），避免角色在两台深位机器人间抖动；
+  - `guard()`：球在己方半场时按 ball.y **全量跟随**（gain 1.0、limit ±1.15），球更深时门将贴门线（inset 0.05m）。
+- 下一轮验证：用 v2.5 打 2~3 场（尤其 rating 1300+ 对手），重点看失球数/门将稳定性；若稳定则可继续上调进攻投入（v2.6：双人前插 + 定位球二次触球后的补射）。
