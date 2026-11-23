@@ -163,7 +163,9 @@ SET_PLAY_NEAR_BALL_M = 2.2
 SET_PLAY_RECEIVER_AHEAD_M = 3.5
 # v2.6:主罚选择改为「到球后方接近点最近」者,接近点=ball-kick_dir*该距离(m),
 # 阶段内保留原主罚的额外宽容距离(m),避免贴边线球绕不过来/首触慢。
-SET_PLAY_TAKER_APPROACH_M = 1.0
+# v2.14:1.0→0.5(analyst+Lead:第7场定位球首触中位 12.2s、25 条里 22 条 >3s,
+# 绕后 1.0m 太远;缩短接近点让主罚更快触球,配合 avoid_ball=False)。
+SET_PLAY_TAKER_APPROACH_M = 0.5
 SET_PLAY_TAKER_KEEP_MARGIN_M = 0.6
 # v2.6:二次触球定位球的短传力度按距离插值,不再固定 3.6;
 # 线上 20c6a6cb 第 1 球就是固定力度短传被罚下队友、落点朝己门滚 8.2m 乌龙。
@@ -177,6 +179,9 @@ SET_PLAY_PASS_POWER_MAX = 4.5
 SET_PLAY_PASS_GOAL_LINE_GAP_M = 2.0
 SET_PLAY_PASS_OFFLINE_M = 1.0
 SET_PLAY_LATERAL_POWER = 3.2
+# v2.14:定位球第一脚落点距最近对手至少该值(m),避免传到被对手站住的中场
+# (analyst 第 7 场复盘:界外球/门球第一脚多次直接送给对手形成远射)。
+SET_PLAY_PASS_OPP_CLEAR_M = 1.6
 
 # ======================================================================
 # 站位 / 避让
@@ -279,7 +284,11 @@ STOP_VACATE_SPEED = 1.0
 # 让宽限窗口对齐裁判的真实计时点(否则宽限整体右移、刹车指令发晚)。
 STOP_STATE_LATENCY_COMP_S = 0.35
 # v2.8:慢爬归零(窗口已延长到 1.15s,足够撤出 1.45m 风险圈),窗口后一律硬停。
-STOP_CRAWL_SPEED = 0.0
+# v2.14:0.0→0.12。v2.13 窗口 0.5s 快撤后硬停,线上 d1ebca78 第 9 场仍吃 2 张
+# 定位球防守罚单(defender_set_play_interference + illegalPosition 1.005m<1.45);
+# 盘带期径向慢爬远离满足 R-07 的「径向远离」豁免,0.12m/s 在 M-02 的 2s 观察窗
+# 内仅 0.24m<0.3m。
+STOP_CRAWL_SPEED = 0.12
 # v2.7:活球「站桩」修复(P0)。球几乎静止且我方非门将无人进入 1.2m 时,
 # 强制最近的非门将去抢(绕过 support/粘滞选择)。线上 dffb89db/b4c9a02e
 # 复盘:球静止 2-4s、最近人 0.74-0.83m 站着不抢,白给对手断球/补射。

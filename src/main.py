@@ -373,6 +373,15 @@ def _set_play_kick_plan(
             ty = clamp(ty, -half_w + 1.2, half_w - 1.2)
             if _dist_point_to_line(tx, ty, ball.x, ball.y, gx, gy) < SET_PLAY_PASS_OFFLINE_M:
                 continue
+            # v2.14:落点必须离最近对手 >= SET_PLAY_PASS_OPP_CLEAR_M,避免第一脚
+            # 直接传到被对手站住的中场(analyst 第 7 场:对方 7.66/7.98m/s 远射)。
+            opp_clear = math.inf
+            for opp in context.opponents.values():
+                if opp.pose is None:
+                    continue
+                opp_clear = min(opp_clear, dist(tx, ty, opp.pose.x, opp.pose.y))
+            if opp_clear < SET_PLAY_PASS_OPP_CLEAR_M:
+                continue
             best = d
             mate = mate_state
             target = (tx, ty)
@@ -862,7 +871,9 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             ball.y - math.sin(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
             0.25,
         )
-        taker.walk_to(approach, face=kick_dir, avoid_ball=True)
+        # v2.14:avoid_ball=False(analyst+Lead:绕开球会让主罚多绕 1-2s 才触球,
+        # 线上第 7 场定位球首触中位 12.2s;接近点已缩到 0.5m,直接走向球更稳)。
+        taker.walk_to(approach, face=kick_dir, avoid_ball=False)
     else:
         taker.kick(kick_dir, power)
 
@@ -1019,11 +1030,12 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
                     p.action = "stopped:vacate"
                     p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
                 else:
-                    # v2.8:窗口(1.15s@1.0m/s)内已撤出 1.45m 风险圈,之后一律
-                    # 硬停。v2.7 的 0.12m/s 慢爬跨过 1.5s 静止宽限,2s 窗口累计
-                    # 0.332m>0.3m 吃了 stopped_motion(M-02)。
-                    p.action = "stopped:hold"
-                    p.stop()
+                    # v2.14:窗口(0.5s@1.0m/s)快撤后改 0.12m/s 径向慢爬,继续远离球。
+                    # v2.13 硬停后线上 d1ebca78(第 9 场)仍吃 defender_set_play_
+                    # interference + illegalPosition(距球 1.005m<1.45,R-07)各 1 张;
+                    # 慢速径向远离满足 R-07 豁免,0.12m/s 在 M-02 2s 观察窗内仅 0.24m。
+                    p.action = "stopped:crawl"
+                    p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
                 continue
         p.action = "stopped"
         p.stop()
