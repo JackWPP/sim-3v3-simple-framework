@@ -306,39 +306,6 @@ def _away_from_ball_point(
     return _field_point(context, bx + ux * distance, by + uy * distance, 0.3)
 
 
-def _tangential_escape_point(
-    context: Context, ball, pose,
-) -> tuple[float, float]:
-    """v3.1(P0-2):径向撤离目标被 clamp 到贴边/贴角时,改沿切向朝场内撤。
-
-    只沿「球→机器人」径向走会被边线夹住(第 33 场 R-06:摆球点 0.22m 处,
-    径向目标距 pose 仅 0.56m<0.9 → 旧代码 hold 不动)。这里取垂直切向两点,
-    选离场地边界更远、且离球不更近的一侧。
-    """
-    bx, by = ball.x, ball.y
-    dx, dy = pose.x - bx, pose.y - by
-    d = math.hypot(dx, dy)
-    if d < 1e-6:
-        ux, uy = -1.0, 0.0
-    else:
-        ux, uy = dx / d, dy / d
-    half_l = context.field.length / 2.0
-    half_w = context.field.width / 2.0
-    best = None
-    best_score = -1e9
-    for sign in (1.0, -1.0):
-        tx = pose.x + sign * (-uy) * STOP_VACATE_TARGET_M
-        ty = pose.y + sign * ux * STOP_VACATE_TARGET_M
-        fx = _field_point(context, tx, ty, 0.4)
-        edge = min(half_l - abs(fx[0]), half_w - abs(fx[1]))
-        d_ball = math.hypot(fx[0] - bx, fx[1] - by)
-        score = edge * 10.0 + min(d_ball, 3.0)
-        if score > best_score:
-            best_score = score
-            best = fx
-    return best if best is not None else _away_from_ball_point(context, ball, pose, STOP_VACATE_TARGET_M)
-
-
 def _defender_set_play_spot(context: Context, ball, lateral: float) -> tuple[float, float]:
     """防守等待点:沿"球→己方门"方向后退 SET_PLAY_DEF_SAFE_DIST_M,并横向错开。"""
     gx, gy = own_goal(context)
@@ -1184,67 +1151,12 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
         # v2.16:记录「我方首次检测到 stopped」的时刻,用于双段撤离的早段判定。
         store.stopped_detect_at = context.now
     elapsed = context.now - getattr(store, "stopped_since", context.now)
-    elapsed_detect = context.now - getattr(store, "stopped_detect_at", context.now)
 
-    our_team = context.team_id
-    defending_restart = (
-        g.state == GameState.PLAYING
-        and g.stopped
-        and g.set_play != SetPlay.NONE
-        and g.kicking_team is not None
-        and int(g.kicking_team) != int(KICKING_TEAM_NONE)
-        and int(g.kicking_team) != int(our_team)
-    )
-    ball = context.ball
-    # v2.6:门将不参与撤离(vacate 会把它从门线上拉走),宁可让门将静止。
-    keeper_id = None
-    if players:
-        gx, gy = own_goal(context)
-        keeper_id = min(
-            players, key=lambda q: dist(q.pose.x, q.pose.y, gx, gy)
-        ).id
-
+    # v3.2(Lead m03816):删除 stopped 摆球期的 vacate/crawl/hold 全部移动,改为全停。
+    # 数据结论:裁判 1.5s 宽限内「撤到 1.45m 外」与 M-02(位移>0.3m)不可兼得 ——
+    # v3.1/v3.1b 的 vacate 窗口把 4 张 stopped_motion 带回来(0.304–0.339m 全边际
+    # 超阈);而 R-06/R-07 改由活球期 P0-1 出界预判撤位 + P1 贴线 taker 修复解决。
     for p in players:
-        if (
-            defending_restart
-            and ball is not None
-            and p.pose is not None
-            and p.id != keeper_id
-        ):
-            d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
-            # v2.15:触发 1.8→2.3m、撤离目标 2.0→2.6m(analyst 第 9 场复盘:
-            # 摆在 1.8-2.3m 的机器人主罚触球瞬间常在 1.45m 红线附近)。
-            if d_ball < STOP_VACATE_TRIGGER_M:
-                target = _away_from_ball_point(
-                    context, ball, p.pose, STOP_VACATE_TARGET_M
-                )
-                # v3.1(P0-2, analyst):窗口用 stopped_detect_at 的 elapsed 计算,
-                # 不用 latency comp 1.15(那会让 elapsed 起步就 1.15 > 旧 window
-                # 0.5 → vacate 分支永远进不去 = 死代码,第 33 场 R-06 根因之一);
-                # 夹取后目标距 pose <0.9m(贴边/角旗)时改切向朝场内,不再 hold 不动。
-                if dist(p.pose.x, p.pose.y, target[0], target[1]) < 0.9:
-                    target = _tangential_escape_point(context, ball, p.pose)
-                if elapsed_detect <= STOP_VACATE_WINDOW_S:
-                    p.action = "stopped:vacate"
-                    p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
-                else:
-                    # v2.14:窗口(0.5s@1.0m/s)快撤后改 0.12m/s 径向慢爬,继续远离球。
-                    # v2.13 硬停后线上 d1ebca78(第 9 场)仍吃 defender_set_play_
-                    # interference + illegalPosition(距球 1.005m<1.45,R-07)各 1 张;
-                    # 慢速径向远离满足 R-07 豁免,0.12m/s 在 M-02 2s 观察窗内仅 0.24m。
-                    # v2.16:目标被 clamp 到距 pose<0.9m 时(贴边/角旗)直接停,
-                    # 不为了 0.3m 的撤离在判定窗里多走;否则 0.10m/s 径向慢爬
-                    # (R-07「径向远离」豁免要求 ≥0.05m/s)。
-                    # v2.16(analyst m02284「低」):检测后 0.35s 内先按
-                    # 0.3m/s 径向冲出(0.105m<0.3m 安全),再降到 0.10m/s
-                    # 慢爬;覆盖检测时距球 1.3–1.5m 的 R-07 风险窗口。
-                    burst = elapsed_detect <= STOP_EARLY_BURST_S
-                    crawl_speed = (
-                        STOP_EARLY_BURST_SPEED if burst else STOP_CRAWL_SPEED
-                    )
-                    p.action = "stopped:crawl"
-                    p.omni_move_toward(target, speed=crawl_speed)
-                continue
         p.action = "stopped"
         p.stop()
 
