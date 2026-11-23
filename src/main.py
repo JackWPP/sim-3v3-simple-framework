@@ -163,7 +163,10 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
                 and opp_score is not None
                 and opp_score > prev_opp
             ):
-                store.defend_hold_until = context.now + POST_CONCEDE_HOLD_S
+                # v2.17(analyst): 失球后立刻进入 READY/SET,POST_CONCEDE_HOLD_S=3s
+                # 会在 READY 内就过期(死代码)。改为挂 pending,等第一个 NORMAL
+                # 帧(_act_normal)再开 3s 窗口,真正常规时间生效。
+                store.post_concede_pending = True
             if opp_score is not None:
                 store.opp_score = opp_score
         game_state = g.state.value if g is not None else "none"
@@ -548,6 +551,10 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     ball = context.ball
     if ball is None:  # 理论不可达(上面的 None 分支已 return),防御性收窄类型
         return
+    # v2.17: 失球后的防守窗口从「进入 NORMAL 的第一帧」起算(README/SET 不算)。
+    if getattr(store, "post_concede_pending", False):
+        store.defend_hold_until = context.now + POST_CONCEDE_HOLD_S
+        store.post_concede_pending = False
 
     # v2.0 协同分工:先固定 1 台门将(离己方门最近),绝不让门将参与抢球;
     # 剩下两人里离球最近者当 primary(抢/带/射),最后一人当 support(接应/保护)。
@@ -591,11 +598,24 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         near = min(
             field_players, key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
         )
-        if dist(near.pose.x, near.pose.y, ball.x, ball.y) > PRESSER_TRIGGER_DIST_M:
-            forced_presser = near
+        chosen = near
+        # v2.17(analyst 第11场): presser 粘滞 1s,避免 distance 排序换人导致
+        # 「手递手」浪费 0.3–0.5s(第11场 G1/G3 presser 交接)。
+        prev_id = getattr(store, "presser_id", None)
+        if getattr(store, "presser_until", 0.0) > context.now and prev_id is not None:
+            prev = next((q for q in field_players if q.id == prev_id), None)
+            if prev is not None:
+                chosen = prev
+        if (
+            dist(chosen.pose.x, chosen.pose.y, ball.x, ball.y)
+            > PRESSER_TRIGGER_DIST_M
+        ):
+            forced_presser = chosen
     if forced_presser is not None:
         attacker = forced_presser
         store.normal_attacker = attacker.id
+        store.presser_id = attacker.id
+        store.presser_until = context.now + PRESSER_HOLD_S
         # v2.12(P0-a): 己方三区死球不再绕位,直接站到球的门侧再解围。第 7 场
         # sim 148.31/554.53 两失球同型:三区静止球,我方最近者绕位 1.5s 不触球,
         # 对手 0.35m 先捅;解围方向朝对方半场边线(不在门前横传)。
@@ -614,15 +634,17 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
                 ux, uy = -1.0, 0.0
             ax = ball.x + PRESSER_DEADBALL_APPROACH_M * ux
             ay = ball.y + PRESSER_DEADBALL_APPROACH_M * uy
-            if (
-                attacker.pose is not None
-                and dist(attacker.pose.x, attacker.pose.y, ax, ay) > 0.25
-            ):
+            d_ball = (
+                dist(attacker.pose.x, attacker.pose.y, ball.x, ball.y)
+                if attacker.pose is not None
+                else 99.0
+            )
+            if d_ball > PRESSER_KICK_DIST_M:
+                # v2.17(analyst): 1.6m/s omni 直冲门侧点,不再按 walk_to 低速绕行。
                 attacker.action = "pressing:clear_approach"
-                attacker.walk_to(
+                attacker.omni_move_toward(
                     _field_point(context, ax, ay, 0.4),
-                    avoid_ball=False,
-                    avoid_robots=True,
+                    speed=PRESSER_APPROACH_SPEED_MPS,
                 )
             else:
                 side = 1.0 if ball.y >= 0.0 else -1.0

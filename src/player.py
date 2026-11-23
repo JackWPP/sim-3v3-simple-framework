@@ -117,6 +117,10 @@ class Player:
         self._guard_threatened: bool = False
         # 门线撞球进门迟滞状态
         self._goal_line_push: bool = False
+        # v2.17: 门将过线点预测用的球速差分缓存;解围卡死自恢复计时。
+        self._ball_prev: tuple[float, float, float] | None = None
+        self._clear_kick_started: float | None = None
+        self._clear_ball_xy: tuple[float, float] | None = None
         # support 卡住后临时转 attack 的跨帧状态
         self._support_last_pos: tuple[float, float] | None = None
         self._support_stationary_since: float | None = None
@@ -867,6 +871,15 @@ class Player:
 
         ball = ctx.ball
         half_l = ctx.field.length / 2.0
+        # v2.17: 球速差估计(过线点预测/解围卡死判据),跨帧差分、防 dt 异常。
+        ball_vel: tuple[float, float] | None = None
+        if ball is not None:
+            if self._ball_prev is not None:
+                px, py, pt = self._ball_prev
+                dt = ctx.now - pt
+                if 1e-3 < dt <= 0.5:
+                    ball_vel = ((ball.x - px) / dt, (ball.y - py) / dt)
+            self._ball_prev = (ball.x, ball.y, ctx.now)
         # v2.16(Lead m02385):门将解围后不追球。解围踢出后球若已离开解围半径,
         # 立刻结束 kick 任务回门线站位,避免门将跟着球跑离门口。
         if (
@@ -900,12 +913,51 @@ class Player:
                 cover_gain = KEEPER_TRACK_GAIN_FAR
                 cover_lim = KEEPER_TRACK_Y_LIMIT_FAR
             cover_y = clamp(ball.y * cover_gain, -cover_lim, cover_lim)
+            # v2.17: 朝我方门快速滚动的球按「过线点」跟随(球横传/折射时 y 跟对)。
+            if (
+                ball.x < 0.0
+                and ball_vel is not None
+                and math.hypot(ball_vel[0], ball_vel[1])
+                >= KEEPER_PREDICT_MIN_SPEED_MPS
+                and ball_vel[0] < KEEPER_PREDICT_MIN_VX
+            ):
+                t_cross = (-half_l - ball.x) / ball_vel[0]
+                if 0.0 < t_cross <= KEEPER_PREDICT_MAX_TIME_S:
+                    cover_y = clamp(
+                        ball.y + ball_vel[1] * t_cross, -cover_lim, cover_lim
+                    )
             home = (home[0], cover_y)
 
         # 待命朝向:朝球(便于快速反应);球不可见则朝对方门方向(默认 0)。
         face = 0.0
         if GUARD_FACE_BALL and ball is not None:
             face = angle_to(self.pose.x, self.pose.y, ball.x, ball.y)
+
+        # v2.17: 解围卡死自恢复。球门前 0.8s 内基本没动 = kick 任务在绕球/顶球
+        # 卡住(第 11 场 G8 门将 0.8m 处连续 kick 6s、球没动),结束 kick 回门线,
+        # 避免门将长时间离开门线(对方补射时门线空)。
+        if self._clear_kick_started is not None:
+            if ball is None:
+                self.release_kick()
+                self._clear_kick_started = None
+                self._clear_ball_xy = None
+            else:
+                elapsed = ctx.now - self._clear_kick_started
+                moved = dist(
+                    ball.x, ball.y, self._clear_ball_xy[0], self._clear_ball_xy[1]
+                )
+                if moved >= KEEPER_CLEAR_STALL_M:
+                    self._clear_kick_started = None
+                    self._clear_ball_xy = None
+                elif elapsed >= KEEPER_CLEAR_TIMEOUT_S:
+                    self.release_kick()
+                    self._clear_kick_started = None
+                    self._clear_ball_xy = None
+                    self.action = "guard:recover"
+                    self.walk_to(
+                        home, face=face, avoid_ball=False, avoid_robots=True
+                    )
+                    return
 
         # 门前解围(v2.2):球在解围半径内且开放球权 → 直接踢走,避免被补射/乌龙。
         if ball is not None and open_play:
@@ -917,6 +969,8 @@ class Player:
                     ball.x, ball.y, half_l * 0.6, clamp(ball.y * 0.3, -2.0, 2.0)
                 )
                 self.action = "guard:clear"
+                self._clear_kick_started = ctx.now
+                self._clear_ball_xy = (ball.x, ball.y)
                 self.kick(clear_dir, KEEPER_CLEAR_POWER)
                 return
 

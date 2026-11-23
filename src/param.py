@@ -282,10 +282,23 @@ SHOOT_POWER_MAX = 7.5     # 射门力度上限(降低打飞出底线概率)
 # v2.2:门将出击解围 + 关键站位修正
 # 线上 v2.1 首战 0:1(阿白):门将 walk_to 带了 avoid_ball=True,当球滚到门前
 # (门将目标≈球位置)时避球力把门将往反方向推,球从门线横穿时门将反而后退。
-KEEPER_CLEAR_RADIUS_M = 1.35   # 球进入该半径内门将直接踢走(解围)
+# v2.17(analyst 第11场复盘): 1.35→0.85。5 个失球里 4 个门将正在 guard:clear
+# 追球、离线 0.22–0.68m,y 只跟当前球 y 不跟过线点(dy 0.60–0.82);球门前 0.85m
+# 内才出击,减少门将离开门线的机会。
+KEEPER_CLEAR_RADIUS_M = 0.85
 KEEPER_CLEAR_POWER = 6.0       # 解围力度
 KEEPER_DEEP_BALL_X = -5.0      # 球比这更深时门将贴门线站位
 KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
+
+# v2.17(analyst): 门将过线点预测 + 解围卡死自恢复。
+# 球速 >= 0.4m/s 且朝我方门滚动(vx<-0.3)时,用 ball.y+vy*time_to_line 作为
+# 跟随目标,而不是当前 ball.y(球横传/折射时门将 y 跟错方向)。
+KEEPER_PREDICT_MIN_SPEED_MPS = 0.4
+KEEPER_PREDICT_MIN_VX = -0.3      # 仅朝己方门滚动的球才预测过线点
+KEEPER_PREDICT_MAX_TIME_S = 3.0   # 预测时域上限
+# 出击解围后 0.8s 内球位移 <0.2m → 判定 kick 卡死,release_kick 回门线。
+KEEPER_CLEAR_TIMEOUT_S = 0.8
+KEEPER_CLEAR_STALL_M = 0.2
 
 # v2.2:对方定位球摆球期间的撤离节奏。
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
@@ -348,7 +361,12 @@ PRESSER_TRIGGER_DIST_M = 1.2
 # 我方最近者绕位1.5s不触球,对手0.35m先捅)。x < 该值即视为己方三区。
 OWN_THIRD_CLEAR_BALL_X = -3.5
 # v2.12: 死球解围时先站到球的门侧,再起脚。
-PRESSER_DEADBALL_APPROACH_M = 0.45
+# v2.17(analyst 第11场): 0.45→0.30,压迫点到球更近,减少「手递手」绕行。
+PRESSER_DEADBALL_APPROACH_M = 0.30
+# v2.17: presser 粘滞窗口(1s)与直接起脚距离,减少每帧换人浪费 0.3–0.5s。
+PRESSER_HOLD_S = 1.0
+PRESSER_KICK_DIST_M = 0.55
+PRESSER_APPROACH_SPEED_MPS = 1.6
 
 # v2.12(P1): 清球落点改朝边线(避免中路送二点/底线送对方门球)。
 # 落点 x = half_l - KICK_CLEAR_TARGET_X_FROM_GOAL,y = ±(half_w - 该余量)。
