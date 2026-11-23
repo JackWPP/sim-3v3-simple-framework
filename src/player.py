@@ -823,11 +823,11 @@ class Player:
         # 球在对方半场时保守跟随。球比 KEEPER_DEEP_BALL_X 更深时进一步贴线。
         if ball is not None:
             if ball.x < 0.0:
-                cover_gain = KEEPER_TRACK_GAIN_OWN_HALF
-                cover_lim = KEEPER_TRACK_Y_LIMIT_OWN
+                cover_gain = 1.0  # v2.5:按球 y 全量跟随
+                cover_lim = 1.15
                 inset = KEEPER_LINE_INSET_M
                 if ball.x < KEEPER_DEEP_BALL_X:
-                    inset = KEEPER_DEEP_INSET_M
+                    inset = 0.05
                 home = (-(half_l - inset), home[1])
             else:
                 cover_gain = KEEPER_TRACK_GAIN_FAR

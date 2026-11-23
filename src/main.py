@@ -118,6 +118,7 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         store.cur_phase = None
         store.kickoff_taker = None    # 锁定的开球主罚球员 id(每次进入开球时重选)
         store.normal_attacker = None
+        store.normal_keeper = None
         store.set_play_taker = None   # 锁定的定位球主罚球员 id
 
     @staticmethod
@@ -364,6 +365,18 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     # 被选为 attacker 而离门出击(线上 replay 已看到门前无人),这里先锁门将。
     gx, gy = own_goal(context)
     keeper = min(players, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
+    # v2.5:门将粘滞。线上 v2.4(0:5)复盘发现门将角色在两台深位机器人之间反复
+    # 切换,两人都往门前挤/互相推挤,导致门线出现空档。这里保留上一帧门将,除非
+    # 它已明显离门更远(>1.5m)。
+    prev_keeper_id = getattr(store, "normal_keeper", None)
+    if prev_keeper_id is not None:
+        prev_keeper = next((p for p in players if p.id == prev_keeper_id), None)
+        if prev_keeper is not None:
+            d_prev = dist(prev_keeper.pose.x, prev_keeper.pose.y, gx, gy)
+            d_best = dist(keeper.pose.x, keeper.pose.y, gx, gy)
+            if d_prev <= d_best + 1.5:
+                keeper = prev_keeper
+    store.normal_keeper = keeper.id
     field_players = [p for p in players if p is not keeper]
     attacker: Player | None = None
     primary_pose: tuple[float, float] | None = None
@@ -470,6 +483,18 @@ def _act_opp_kickoff(context: Context, players: list[Player]) -> None:
         return
     gx, gy = own_goal(context)
     keeper = min(players, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
+    # v2.5:门将粘滞。线上 v2.4(0:5)复盘发现门将角色在两台深位机器人之间反复
+    # 切换,两人都往门前挤/互相推挤,导致门线出现空档。这里保留上一帧门将,除非
+    # 它已明显离门更远(>1.5m)。
+    prev_keeper_id = getattr(store, "normal_keeper", None)
+    if prev_keeper_id is not None:
+        prev_keeper = next((p for p in players if p.id == prev_keeper_id), None)
+        if prev_keeper is not None:
+            d_prev = dist(prev_keeper.pose.x, prev_keeper.pose.y, gx, gy)
+            d_best = dist(keeper.pose.x, keeper.pose.y, gx, gy)
+            if d_prev <= d_best + 1.5:
+                keeper = prev_keeper
+    store.normal_keeper = keeper.id
     keeper.action = "opp_kickoff:keeper"
     keeper.guard()
     rest = [p for p in players if p is not keeper]
