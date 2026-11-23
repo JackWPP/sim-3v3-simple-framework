@@ -150,6 +150,22 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         # 当前 phase 以 label 画在场外。
         from .framework import debugdraw
         g = context.game
+        # v2.16(Lead m02385):失球后 3s 内保持防守重心。用 GameControl 比分判定
+        # 对手进球(防连续失球),窗口内 support 不许随球退进禁区。
+        if g is not None:
+            opp_score = None
+            for team in g.teams:
+                if int(team.team_number) != int(context.team_id):
+                    opp_score = team.score
+            prev_opp = getattr(store, "opp_score", None)
+            if (
+                prev_opp is not None
+                and opp_score is not None
+                and opp_score > prev_opp
+            ):
+                store.defend_hold_until = context.now + POST_CONCEDE_HOLD_S
+            if opp_score is not None:
+                store.opp_score = opp_score
         game_state = g.state.value if g is not None else "none"
         set_play = g.set_play.value if g is not None else "none"
         secondary_time = g.secondary_time if g is not None else 0.0
@@ -636,7 +652,16 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     keeper.action = "guard"
     keeper.guard()
 
+    # v2.16(Lead m02385):失球后 3s 内 support 保持中场防守线(x≥-2.0),
+    # 不随球退进禁区;primary 照常追球,门将照常守门,避免连续失球。
+    hold_until = getattr(store, "defend_hold_until", 0.0)
+    holding = context.now < hold_until
     for p in rest:
+        if holding and p.pose is not None and p.pose.x < POST_CONCEDE_MIN_X:
+            p.action = "support:hold_line"
+            hy = clamp(ball.y * 0.4, -2.5, 2.5)
+            p.move_to_position((POST_CONCEDE_MIN_X, hy))
+            continue
         p.action = "support"
         p.support(primary_pose)
 
@@ -964,20 +989,38 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
     for i, p in enumerate(rest):
         d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
         target = _defender_set_play_spot(context, ball, laterals[i % len(laterals)])
-        if d_ball < SET_PLAY_DEF_MIN_CLEAR_M:
-            # v2.15:已进入 R-07(1.45m)红线外侧缓冲带:先纯径向退到 2.6m,
-            # 不转头、不等 walk_to 转身,尽快脱离判定区。
+        if d_ball < SET_PLAY_DEF_RADIAL_PULL_DIST_M:
+            # v2.15:已进入 R-07(1.45m)红线外侧缓冲带:先纯径向退到 3.1m。
+            # v2.16:弦线下界只在起点在圆上时成立(analyst m02284),1.7–2.4m
+            # 起步先纯径向拉到 3.1m 再切向转;贴边/角旗被 clamp 得更近时改切向
+            # 撤离,绝不朝球移动。
             target = _away_from_ball_point(
                 context, ball, p.pose, SET_PLAY_DEF_ORBIT_RADIUS_M
             )
+            ex, ey = _field_point(context, target[0], target[1], 0.3)
+            d_escape = dist(ex, ey, ball.x, ball.y)
+            if d_escape < max(SET_PLAY_DEF_MIN_CLEAR_M, d_ball + 0.05):
+                ux, uy = (p.pose.x - ball.x) / max(d_ball, 1e-6), (
+                    p.pose.y - ball.y
+                ) / max(d_ball, 1e-6)
+                best = None
+                for sgn in (1.0, -1.0):
+                    cx = ball.x + (-uy) * sgn * SET_PLAY_DEF_ORBIT_RADIUS_M
+                    cy = ball.y + (ux) * sgn * SET_PLAY_DEF_ORBIT_RADIUS_M
+                    cx, cy = _field_point(context, cx, cy, 0.3)
+                    cd = dist(cx, cy, ball.x, ball.y)
+                    if best is None or cd > best[0]:
+                        best = (cd, cx, cy)
+                _, ex, ey = best
             p.action = "opp_setplay:radial_escape"
-            p.omni_move_toward(target)
+            p.omni_move_toward((ex, ey))
         elif d_ball < SET_PLAY_DEF_SAFE_DIST_M:
             # v2.15:径向先行 + 逐帧闭环。第 9 场 d1ebca78 两张罚单的根因是
             # 从摆球期位置直线走向「球对侧」等待点时路径穿球(R-06 触球 /
-            # R-07 1.005m)。这里改为在「以球心为圆心、半径 2.6m」的圆弧上
-            # 朝等待点方向逐步旋转(每帧 ≤0.55rad),弦线离球最近 2.48m,
-            # 既绕开球又始终远离 1.45m 红线。
+            # R-07 1.005m)。这里改为在「以球心为圆心、半径 3.1m」的圆弧上
+            # 朝等待点方向逐步旋转(每帧 ≤0.55rad),弦线离球最近 2.98m。
+            # v2.16:半径 2.6→3.1 避开 M-05(球距≤3m 且 10s 几乎不动会吃
+            # inactiveRobot);到位后按 2.5s 周期 ±0.2rad 微摆作双保险。
             ux, uy = (p.pose.x - ball.x) / d_ball, (p.pose.y - ball.y) / d_ball
             wx, wy = target[0] - ball.x, target[1] - ball.y
             wn = math.hypot(wx, wy)
@@ -989,12 +1032,19 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
             a_wait = math.atan2(wy / wn, wx / wn)
             step = clamp(normalize_angle(a_wait - a_pose), -0.55, 0.55)
             a = a_pose + step
+            if abs(step) < 0.05:
+                # 已贴近等待角:轻微往返摆动,避免 10s 完全静止触发 M-05。
+                flip = int(context.now / SET_PLAY_DEF_ORBIT_SHUFFLE_PERIOD_S) % 2
+                a += (
+                    SET_PLAY_DEF_ORBIT_SHUFFLE_RAD
+                    if flip == 0
+                    else -SET_PLAY_DEF_ORBIT_SHUFFLE_RAD
+                )
             tx = ball.x + math.cos(a) * SET_PLAY_DEF_ORBIT_RADIUS_M
             ty = ball.y + math.sin(a) * SET_PLAY_DEF_ORBIT_RADIUS_M
             ox, oy = _field_point(context, tx, ty, 0.3)
             if dist(ox, oy, ball.x, ball.y) < SET_PLAY_DEF_MIN_CLEAR_M:
-                # v2.15:贴边/角球时圆弧点会被夹进场内(离球变近),
-                # 退回纯径向撤离,绝不朝球移动。
+                # 贴边/角球时圆弧点会被夹进场内(离球变近),退回径向撤离。
                 target = _away_from_ball_point(
                     context, ball, p.pose, SET_PLAY_DEF_ORBIT_RADIUS_M
                 )
@@ -1035,7 +1085,10 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
     if store.prev_phase != Phase.STOPPED:
         # v2.6:-0.35s 补偿裁判状态的发布延迟,让宽限窗口对齐真实计时点。
         store.stopped_since = context.now - STOP_STATE_LATENCY_COMP_S
+        # v2.16:记录「我方首次检测到 stopped」的时刻,用于双段撤离的早段判定。
+        store.stopped_detect_at = context.now
     elapsed = context.now - getattr(store, "stopped_since", context.now)
+    elapsed_detect = context.now - getattr(store, "stopped_detect_at", context.now)
 
     our_team = context.team_id
     defending_restart = (
@@ -1087,8 +1140,16 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
                         p.action = "stopped:hold"
                         p.stop()
                     else:
+                        # v2.16(analyst m02284「低」):检测后 0.35s 内先按
+                        # 0.3m/s 径向冲出(0.105m<0.3m 安全),再降到 0.10m/s
+                        # 慢爬;覆盖 latency comp 偏大、检测时距球 1.3–1.5m 的
+                        # R-07 风险窗口。
+                        burst = elapsed_detect <= STOP_EARLY_BURST_S
+                        speed = (
+                            STOP_EARLY_BURST_SPEED if burst else STOP_CRAWL_SPEED
+                        )
                         p.action = "stopped:crawl"
-                        p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
+                        p.omni_move_toward(target, speed=speed)
                 continue
         p.action = "stopped"
         p.stop()

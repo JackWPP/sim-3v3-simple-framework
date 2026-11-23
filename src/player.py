@@ -773,12 +773,29 @@ class Player:
         if self._kicking:
             half_l = self.context.field.length / 2.0
             half_w = self.context.field.width / 2.0
-            if ball.x > half_l - 1.0 and self.pose.x > ball.x - 0.2:
-                # v2.15(P1,Lead):球贴近对方门线(≤1.0m)时直接补射入网。
-                # 旧逻辑把这种球朝场中心解围(kick 方向指回半场),kick 任务的
-                # 绕球点落在门线外 → 机器人卡在 x≈7.3 反复起停,门线前散球
-                # 全部补不进(0116ec1d 的 4 次门线前 0.10-0.85m 机会全丢)。
-                goal_half = self.context.field.goal_width / 2.0
+            goal_half = self.context.field.goal_width / 2.0
+            # v2.15(P1,Lead):球贴近对方门线(≤1.0m)时直接补射入网。
+            # v2.16(analyst m02284「中/低」):取消 pose.x>ball.x-0.2 限制——
+            # 从场内跑向门线球时旧逻辑仍走 line_clear 把球踢回中圈;现在先绕到
+            # 球后 0.45m 再补射。角旗区(|ball.y|>goal_half+0.6)仍走 line_clear,
+            # 避免从底线外斜踢变成对方门球。
+            if (
+                ball.x > half_l - 1.0
+                and abs(ball.y) <= goal_half + GOAL_LINE_SHOT_Y_MARGIN_M
+            ):
+                if self.pose.x <= ball.x - 0.2:
+                    self.release_kick()
+                    self.action = "attack:goal_line_approach"
+                    self.walk_to(
+                        (
+                            ball.x - 0.45,
+                            clamp(ball.y, -half_w + 0.3, half_w - 0.3),
+                        ),
+                        face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
+                        avoid_ball=False,
+                        avoid_robots=True,
+                    )
+                    return
                 aim_y = clamp(ball.y * 0.5, -(goal_half - 0.2), goal_half - 0.2)
                 self.action = "attack:goal_line_shot"
                 self.kick(
@@ -850,6 +867,17 @@ class Player:
 
         ball = ctx.ball
         half_l = ctx.field.length / 2.0
+        # v2.16(Lead m02385):门将解围后不追球。解围踢出后球若已离开解围半径,
+        # 立刻结束 kick 任务回门线站位,避免门将跟着球跑离门口。
+        if (
+            self._kicking
+            and (
+                ball is None
+                or dist(self.pose.x, self.pose.y, ball.x, ball.y)
+                > KEEPER_CLEAR_RADIUS_M + 0.3
+            )
+        ):
+            self.release_kick()
         game = ctx.game
         open_play = (
             game is not None

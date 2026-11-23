@@ -122,8 +122,18 @@ SET_PLAY_DEF_SAFE_DIST_M = 3.3
 #     的圆弧上逐步推进(弦线离球最近 2.48m),每帧保证非门将距球≥1.7m。
 STOP_VACATE_TRIGGER_M = 2.3
 STOP_VACATE_TARGET_M = 2.6
-SET_PLAY_DEF_ORBIT_RADIUS_M = 2.6
+# v2.16:2.6→3.1(analyst m02284/Lead m02289「高」风险)。2.6m 等待点落在 M-05
+# 危险圈内(playing+未 stopped、球距≤3m、10s 几乎不动 → inactiveRobot 30s);
+# 对手摆球后常拖 10–40s 才踢(第10场 41.4s/第6场 10.7s/第7场 15.5s)。半径 3.1m
+# 时圆弧弦线离球 ≥2.98m,仍远大于 R-07 的 1.45m 红线。
+SET_PLAY_DEF_ORBIT_RADIUS_M = 3.1
 SET_PLAY_DEF_MIN_CLEAR_M = 1.7
+# v2.16(analyst m02284「中」):弦线下界只在起点在圆上时成立;从 1.7–2.4m 起步
+# 每帧转 0.55rad,实际路径最近会压到 ~1.59m。低于该距离先纯径向拉到 3.1m 再转。
+SET_PLAY_DEF_RADIAL_PULL_DIST_M = 2.4
+# v2.16:圆弧到位后按周期 ±0.2rad 微摆,避开 M-05「10s 几乎不动」判定(双保险)。
+SET_PLAY_DEF_ORBIT_SHUFFLE_RAD = 0.2
+SET_PLAY_DEF_ORBIT_SHUFFLE_PERIOD_S = 2.5
 # 对方开球时等待点距球距离；中圈半径 1.5,必须 >1.55 且在 >3m 外避开 M-05。
 OPP_KICKOFF_WAIT_RADIUS_M = 3.2
 # 门将退到门线附近时距门线的距离(m)。
@@ -308,6 +318,22 @@ STOP_STATE_LATENCY_COMP_S = 1.15
 # (v2.14 crawl 0.12m/s×2.37s≈0.285m + 残余速度,越 0.3m 阈值);0.10m/s 在
 # 2.4s 内仅 0.24m<0.3m,仍满足 R-07「径向远离」豁免(≥0.05m/s)。
 STOP_CRAWL_SPEED = 0.10
+# v2.16(analyst m02284「低」):检测到 stopped 后的 0.35s 内按 0.3m/s 径向冲出,
+# 再降到 STOP_CRAWL_SPEED。latency comp 1.15 是标称最大值,实际延迟更小时若直接
+# crawl,「检测时距球 1.3–1.5m」者仍可能落在 R-07 红线;双段撤离 M-02 最坏
+# 0.35s*0.3=0.105m<0.3m 安全。
+STOP_EARLY_BURST_S = 0.35
+STOP_EARLY_BURST_SPEED = 0.3
+# v2.16(analyst m02284「低」):门线补射只在球位于球门正面时用;|ball.y| 超过
+# goal_half+该余量(角旗区)时仍走 line_clear,避免从底线外斜踢变对方门球。
+GOAL_LINE_SHOT_Y_MARGIN_M = 0.6
+# v2.16(Lead m02385,低风险防守改动):失球后 3s 内非门将 support 的后撤深度
+# 限制在 x≥-2.0(不许随球一路退进禁区),门将解围后不追球。第 11 场
+# 14.6/69.0/237.2 三个早期失球都是首波被打穿/连续丢球。
+POST_CONCEDE_HOLD_S = 3.0
+POST_CONCEDE_MIN_X = -2.0
+
+
 # v2.7:活球「站桩」修复(P0)。球几乎静止且我方非门将无人进入 1.2m 时,
 # 强制最近的非门将去抢(绕过 support/粘滞选择)。线上 dffb89db/b4c9a02e
 # 复盘:球静止 2-4s、最近人 0.74-0.83m 站着不抢,白给对手断球/补射。

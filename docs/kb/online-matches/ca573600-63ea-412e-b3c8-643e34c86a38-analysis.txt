@@ -1,0 +1,50 @@
+{
+ "matchId": "ca573600-63ea-412e-b3c8-643e34c86a38",
+ "durationSeconds": 657.184,
+ "frameCount": 5678,
+ "events": 203,
+ "score": {
+  "home": 4,
+  "away": 5
+ },
+ "teams": {
+  "away": {
+   "name": "Micky-Rex",
+   "score": 5,
+   "fouls": 0,
+   "foulsByReason": {},
+   "goals": 5,
+   "invalidGoals": 0,
+   "oobAwarded": 7,
+   "oobCaused": 3
+  },
+  "home": {
+   "name": "Robot妙妙屋",
+   "score": 4,
+   "fouls": 0,
+   "foulsByReason": {},
+   "goals": 4,
+   "invalidGoals": 0,
+   "oobAwarded": 3,
+   "oobCaused": 7
+  }
+ },
+ "winner": "away",
+ "coordination": {
+  "home": {
+   "frames": 5678,
+   "avg_pair_dist_m": 4.34,
+   "pct_min_pair_lt_1m": 10.0,
+   "pct_two_within_1_5m_ball": 5.7,
+   "avg_nearest_to_ball_m": 3.02
+  },
+  "away": {
+   "frames": 5678,
+   "avg_pair_dist_m": 4.34,
+   "pct_min_pair_lt_1m": 11.0,
+   "pct_two_within_1_5m_ball": 6.0,
+   "avg_nearest_to_ball_m": 2.94
+  },
+  "ball_in_home_half_pct": 48.8
+ }
+}
