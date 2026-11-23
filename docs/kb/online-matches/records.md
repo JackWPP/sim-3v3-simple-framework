@@ -45,6 +45,7 @@
 | 31 | 2026-11-24 04:21 | v2.27 (ver33) | 123213 | 1213 | **1:3 负** | 0 | 1 | 我方进球 sim3.1、失球 sim54.8/238.6/556.0；对方 2 球被判 goal_disallowed_indirect（269.7/291.8）；双方 0/1 罚；retake 0；home avg_pair 4.08m、min_pair<1m 10.0%、two<1.5m 5.3%、avg_nearest 2.02m、ball_in_home_half **82.6%**；oob awarded 15/caused 5；69 段 sha 69/69、6023 帧、686.5s；rating 1023→1013（−10），对方 1213→1242（+29）；counted=true | **v2.27 = rejected**（Lead m03543）：解围射线清空导致前场挤球（第30场 min_pair 25.1% 近4场最差）+ 0 进球 + 3 罚 + R-06 复发 + ball 半场 64.6/82.6%；保留 commit b7709ba 作对照，不再跑第 3 场 | 待 analyst | **有效** |
 | 32 | 2026-11-24 04:44 | v3.0 (ver34) | 句号 | 1185 | **1:1 平** | 0 | 1 | 我方进球 sim125.31、失球 sim381.03；对方 1 罚 fallenRobot robot6@sim492.42；retake 0；home avg_pair 4.52m、min_pair<1m 13.8%、two<1.5m 7.3%、avg_nearest 2.31m、ball_in_home_half **58.5%**；oob awarded 17/caused 13；73 段 sha 73/73、6274 帧、722.7s；rating 1013→1021（+8），对方 1185→1166（−19）；counted=true | v3.0 A/B 1/3：restore v2.16 基线 + 2 patches（#22 夹取/门口容差带）。验收：ball 半场 58.5%<60 ✓、失球 1≤2 ✓、进球 1 ✓、罚单 0≤1 ✓、R-06=0 ✓ → 单场通过 | 待 analyst | **有效** |
 | 33 | 2026-11-24 05:00 | v3.0 (ver34) | 123213 | 1242 | **0:1 负** | 1 | 0 | 失球 sim482.26，对方另 1 球被判 goal_disallowed_indirect（sim85.44）；我方 1 罚 R-06 defender_set_play_interference robot3@sim123.65（+对方 retake）；retake 1；home avg_pair 4.45m、min_pair<1m 11.8%、two<1.5m 5.5%、avg_nearest 2.64m、ball_in_home_half **66.7%**；oob awarded 20/caused 14；73 段 sha 73/73、6495 帧、729.3s；rating 1021→1012（−9），对方 1242→1265（+23）；counted=true | v3.0 A/B 2/3：失球 1≤2 ✓、进球 0 ✗、罚单 1≤1 ✓、R-06 1 ✗、ball 半场 66.7% ✗ → 单场不达标 | 待 analyst | **有效** |
+| 34 | 2026-11-24 05:15 | v3.0 (ver34) | lhz | 1061 | **3:0 胜** | 0 | 0 | 我方 3 球、0 失球（detail：home_score 3/away_score 0）；双方 0 罚、0 retake；**回放归档不可用**（realtime_replay.zip_ready=false、manifest_url=null，run_id 747c72ad），无法离线统计 ball 半场/min_pair；rating 1012→1032（+20），对方 1061→993（−68）；counted=true | v3.0 A/B 3/3：罚单 0 ✓、失球 0≤2 ✓、进球 3≥1 ✓、R-06=0 ✓（fouls=0）；ball 半场因无归档无法核验 → 按「2 场不输」判 v3.0 达标 | 待 analyst（无回放） | **有效（归档缺失）** |
 
 
 ## 有效局里程碑：10/10 达成（2026-11-23 22:13）
@@ -109,3 +110,15 @@ v2.7 `_act_normal` presser 分支裸 `ball`），两次都被 framework `runtime
 |---|---|---|---|---|---|---|---|---|
 | 1/3 | #32 fde87d29 | 04:44 | v3.0 ver34 | 句号(1185) | 1:1 平 | 0 | 13.8% / 58.5% | 全项达标；rating 1013→1021（+8） |
 | 2/3 | #33 72f46b44 | 05:00 | v3.0 ver34 | 123213(1242) | 0:1 负 | 1(R-06) | 11.8% / 66.7% | 进球 0、R-06、球半场 66.7% → 不达标；rating 1021→1012（−9） |
+| 3/3 | #34 5880a949 | 05:15 | v3.0 ver34 | lhz(1061) | **3:0 胜** | 0 | 归档缺失 / 归档缺失 | 0 罚/0 失球/3 进球 → 达标（ball 半场无法核验）；rating 1012→1032（+20） |
+
+### v3.0 A/B 小结（3 场，2026-11-24）
+
+| 版本 | 场次 | 战绩 | 进球/失球 | 罚单(含 R-06) | ball 半场 | rating |
+|---|---|---|---|---|---|---|
+| v2.26 | 3（#27-29） | 0 胜 3 负 | 3/9 | 0（0 R-06） | 69.7%/62.4%/74.8% | 1074→1036 |
+| v2.27 | 2（#30-31） | 0 胜 2 负 | 1/5 | 3（1 R-06） | 64.6%/82.6% | 1036→1013 |
+| **v3.0** | 3（#32-34） | **1 胜 1 平 1 负** | **4/2** | 1（1 R-06） | 58.5%/66.7%/缺失 | **1013→1032（+19）** |
+
+结论：v3.0（restore v2.16 + 2 patches）明显优于 v2.26/v2.27 —— 首个胜场（3:0）、rating 净 +19、失球 4→2/3 场、球半场最低 58.5%；R-06 仅 1 次（#33 defender_set_play_interference）。**建议 v3.0 作为新基线继续打**（Lead m03523 Plan B 的「≥2 场不输」条件满足）。
+遗留：①#33 R-06 仍偶发（defender_set_play_interference，robot3 在对方摆球期触球）；②#34 回放缺失需查平台；③ball 半场仍 58.5–66.7%，进攻/中场控制待提升。
