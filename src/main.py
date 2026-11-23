@@ -306,6 +306,39 @@ def _away_from_ball_point(
     return _field_point(context, bx + ux * distance, by + uy * distance, 0.3)
 
 
+def _tangential_escape_point(
+    context: Context, ball, pose,
+) -> tuple[float, float]:
+    """v3.1(P0-2):径向撤离目标被 clamp 到贴边/贴角时,改沿切向朝场内撤。
+
+    只沿「球→机器人」径向走会被边线夹住(第 33 场 R-06:摆球点 0.22m 处,
+    径向目标距 pose 仅 0.56m<0.9 → 旧代码 hold 不动)。这里取垂直切向两点,
+    选离场地边界更远、且离球不更近的一侧。
+    """
+    bx, by = ball.x, ball.y
+    dx, dy = pose.x - bx, pose.y - by
+    d = math.hypot(dx, dy)
+    if d < 1e-6:
+        ux, uy = -1.0, 0.0
+    else:
+        ux, uy = dx / d, dy / d
+    half_l = context.field.length / 2.0
+    half_w = context.field.width / 2.0
+    best = None
+    best_score = -1e9
+    for sign in (1.0, -1.0):
+        tx = pose.x + sign * (-uy) * STOP_VACATE_TARGET_M
+        ty = pose.y + sign * ux * STOP_VACATE_TARGET_M
+        fx = _field_point(context, tx, ty, 0.4)
+        edge = min(half_l - abs(fx[0]), half_w - abs(fx[1]))
+        d_ball = math.hypot(fx[0] - bx, fx[1] - by)
+        score = edge * 10.0 + min(d_ball, 3.0)
+        if score > best_score:
+            best_score = score
+            best = fx
+    return best if best is not None else _away_from_ball_point(context, ball, pose, STOP_VACATE_TARGET_M)
+
+
 def _defender_set_play_spot(context: Context, ball, lateral: float) -> tuple[float, float]:
     """防守等待点:沿"球→己方门"方向后退 SET_PLAY_DEF_SAFE_DIST_M,并横向错开。"""
     gx, gy = own_goal(context)
@@ -548,6 +581,9 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     ball = context.ball
     if ball is None:  # 理论不可达(上面的 None 分支已 return),防御性收窄类型
         return
+    # v3.1:本帧球速向量只差分一次,供出界预判/forced_presser 共用(重复调用会
+    # 把 store.ball_prev 覆盖成本帧,导致 dt≈0 返回 None)。
+    ball_vel = _ball_velocity_mps(context, store)
 
     # v2.0 协同分工:先固定 1 台门将(离己方门最近),绝不让门将参与抢球;
     # 剩下两人里离球最近者当 primary(抢/带/射),最后一人当 support(接应/保护)。
@@ -570,6 +606,53 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
                 keeper = prev_keeper
     store.normal_keeper = keeper.id
     field_players = [p for p in players if p is not keeper]
+    # v3.1(P0-1, analyst+Lead):活球出界预判撤位。我方触球后球将出界时,最近者
+    # 立刻沿「球→己门」方向退 2.8m(场内 0.4m clamp,1.5m/s omni)。否则对手在
+    # 同点摆 throwIn/corner 时我方球员恰在摆球点 → R-06/R-07(第 33 场源头)。
+    out_retreater: Player | None = None
+    game_early = context.game
+    if (
+        field_players
+        and ball_vel is not None
+        and game_early is not None
+        and game_early.state == GameState.PLAYING
+        and not game_early.stopped
+        and (game_early.set_play is None or game_early.set_play == SetPlay.NONE)
+    ):
+        half_l_e = context.field.length / 2.0
+        half_w_e = context.field.width / 2.0
+        margin_e = BALL_OUT_PREDICT_MARGIN_M
+        min_v = BALL_OUT_PREDICT_MIN_SPEED_MPS
+        going_out = (
+            (ball.y > half_w_e - margin_e and ball_vel[1] > min_v)
+            or (ball.y < -(half_w_e - margin_e) and ball_vel[1] < -min_v)
+            or (ball.x > half_l_e - margin_e and ball_vel[0] > min_v)
+            or (ball.x < -(half_l_e - margin_e) and ball_vel[0] < -min_v)
+        )
+        if going_out:
+            out_retreater = min(
+                field_players,
+                key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
+            )
+    if out_retreater is not None:
+        gx_o, gy_o = own_goal(context)
+        ux_o, uy_o = gx_o - ball.x, gy_o - ball.y
+        un_o = math.hypot(ux_o, uy_o)
+        if un_o > 1e-6:
+            ux_o, uy_o = ux_o / un_o, uy_o / un_o
+        else:
+            ux_o, uy_o = -1.0, 0.0
+        out_retreater.action = "normal:out_retreat"
+        out_retreater.omni_move_toward(
+            _field_point(
+                context,
+                ball.x + BALL_OUT_RETREAT_M * ux_o,
+                ball.y + BALL_OUT_RETREAT_M * uy_o,
+                0.4,
+            ),
+            speed=BALL_OUT_RETREAT_SPEED_MPS,
+        )
+        field_players = [q for q in field_players if q is not out_retreater]
     attacker: Player | None = None
     primary_pose: tuple[float, float] | None = None
     rest: list[Player] = []
@@ -577,7 +660,7 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     # 常没人去抢(最近者 0.7-0.9m 却因绕球/角色停在旁边),白给对手断球。这里
     # 在开放球权 + 球几乎静止 + 无人贴近时,强制最近的非门将做 presser。
     game = context.game
-    speed = _ball_speed_mps(context, store)
+    speed = math.hypot(ball_vel[0], ball_vel[1]) if ball_vel is not None else None
     forced_presser: Player | None = None
     if (
         field_players
@@ -903,9 +986,22 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             ball.y - math.sin(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
             0.3,  # v2.15:绕行目标留 0.3m 场内余量(analyst 提醒)
         )
-        # v2.14:avoid_ball=False(analyst+Lead:绕开球会让主罚多绕 1-2s 才触球,
-        # 线上第 7 场定位球首触中位 12.2s;接近点已缩到 0.5m,直接走向球更稳)。
-        taker.walk_to(approach, face=kick_dir, avoid_ball=False)
+        # v3.1(P1, analyst):贴线球主罚从场内一侧绕(avoid_ball=True),避免机身
+        # 斜穿把球顶出线(第 33 场 R-06 起点)。贴线=球距任一边线<0.7m。
+        half_w_p = context.field.width / 2.0
+        half_l_p = context.field.length / 2.0
+        near_touchline = (
+            abs(ball.y) > half_w_p - 0.7 or abs(ball.x) > half_l_p - 0.7
+        )
+        if near_touchline:
+            approach = (
+                clamp(approach[0], -half_l_p + 0.35, half_l_p - 0.35),
+                clamp(approach[1], -half_w_p + 0.35, half_w_p - 0.35),
+            )
+            taker.walk_to(approach, face=kick_dir, avoid_ball=True)
+        else:
+            # v2.14:avoid_ball=False(绕开球会让主罚多绕 1-2s 才触球)。
+            taker.walk_to(approach, face=kick_dir, avoid_ball=False)
     else:
         taker.kick(kick_dir, power)
 
@@ -1122,10 +1218,13 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
                 target = _away_from_ball_point(
                     context, ball, p.pose, STOP_VACATE_TARGET_M
                 )
-                if (
-                    elapsed <= STOP_VACATE_WINDOW_S
-                    and dist(p.pose.x, p.pose.y, target[0], target[1]) >= 0.9
-                ):
+                # v3.1(P0-2, analyst):窗口用 stopped_detect_at 的 elapsed 计算,
+                # 不用 latency comp 1.15(那会让 elapsed 起步就 1.15 > 旧 window
+                # 0.5 → vacate 分支永远进不去 = 死代码,第 33 场 R-06 根因之一);
+                # 夹取后目标距 pose <0.9m(贴边/角旗)时改切向朝场内,不再 hold 不动。
+                if dist(p.pose.x, p.pose.y, target[0], target[1]) < 0.9:
+                    target = _tangential_escape_point(context, ball, p.pose)
+                if elapsed_detect <= STOP_VACATE_WINDOW_S:
                     p.action = "stopped:vacate"
                     p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
                 else:
@@ -1136,20 +1235,15 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
                     # v2.16:目标被 clamp 到距 pose<0.9m 时(贴边/角旗)直接停,
                     # 不为了 0.3m 的撤离在判定窗里多走;否则 0.10m/s 径向慢爬
                     # (R-07「径向远离」豁免要求 ≥0.05m/s)。
-                    if dist(p.pose.x, p.pose.y, target[0], target[1]) < 0.9:
-                        p.action = "stopped:hold"
-                        p.stop()
-                    else:
-                        # v2.16(analyst m02284「低」):检测后 0.35s 内先按
-                        # 0.3m/s 径向冲出(0.105m<0.3m 安全),再降到 0.10m/s
-                        # 慢爬;覆盖 latency comp 偏大、检测时距球 1.3–1.5m 的
-                        # R-07 风险窗口。
-                        burst = elapsed_detect <= STOP_EARLY_BURST_S
-                        speed = (
-                            STOP_EARLY_BURST_SPEED if burst else STOP_CRAWL_SPEED
-                        )
-                        p.action = "stopped:crawl"
-                        p.omni_move_toward(target, speed=speed)
+                    # v2.16(analyst m02284「低」):检测后 0.35s 内先按
+                    # 0.3m/s 径向冲出(0.105m<0.3m 安全),再降到 0.10m/s
+                    # 慢爬;覆盖检测时距球 1.3–1.5m 的 R-07 风险窗口。
+                    burst = elapsed_detect <= STOP_EARLY_BURST_S
+                    crawl_speed = (
+                        STOP_EARLY_BURST_SPEED if burst else STOP_CRAWL_SPEED
+                    )
+                    p.action = "stopped:crawl"
+                    p.omni_move_toward(target, speed=crawl_speed)
                 continue
         p.action = "stopped"
         p.stop()

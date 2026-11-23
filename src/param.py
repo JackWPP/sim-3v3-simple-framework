@@ -300,8 +300,10 @@ KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
 # throwIn stopped 期):1.15s 窗口本身占掉裁判 1.5s 静止宽限的大半,窗口末仍
 # 以 1.0m/s 滑行易累计超 0.3m。0.5s@1.0m/s=0.5m 撤出仍在 1.5s 宽限内完成,
 # 余下 1.0s 硬停,位移余量足够(v2.6 0.35s 窗口线上无罚单)。
-STOP_VACATE_WINDOW_S = 0.5
-STOP_VACATE_SPEED = 1.0
+# v3.1(P0-2, analyst):窗口用 stopped_detect_at 的 elapsed 计算(见 _act_stopped),
+# 1.3s@1.2m/s 在裁判 1.5s 宽限内完成撤离;旧值 0.5s 配 latency comp 1.15 是死代码。
+STOP_VACATE_WINDOW_S = 1.3
+STOP_VACATE_SPEED = 1.2          # v3.1(P0-2):0.5s 窗口内要撤 0.6m
 # v2.6:GameControl 状态发布有 0~0.5s 延迟,记录 stopped_since 时回拨该补偿,
 # 让宽限窗口对齐裁判的真实计时点(否则宽限整体右移、刹车指令发晚)。
 # v2.16:0.35→1.15(analyst 第 10 场 0116ec1d 复盘)。M-02 真实判定窗只有 0.96s
@@ -393,3 +395,15 @@ KICK_BEHIND_MARGIN_M = 0.02
 GOAL_MOUTH_BAND_X = 7.0
 GOAL_MOUTH_BAND_Y = 1.6
 GOAL_MOUTH_ROBOT_MAX_X = 7.12
+
+
+# ---------------------------------------------------------------------------
+# v3.1(P0-1, analyst+Lead): 活球出界预判撤位
+# 我方触球后球将出界时,最近者沿「球→己门」方向先退 2.8m(场内 0.4m clamp,
+# 1.5m/s omni,活球期不受 stopped 限速)。避免对手在同点摆 throwIn/corner 时
+# 我方球员恰在摆球点 → R-06/R-07(第 33 场 R-06 的源头)。
+# ---------------------------------------------------------------------------
+BALL_OUT_PREDICT_MARGIN_M = 0.35
+BALL_OUT_PREDICT_MIN_SPEED_MPS = 0.2
+BALL_OUT_RETREAT_M = 2.8
+BALL_OUT_RETREAT_SPEED_MPS = 1.5
