@@ -289,6 +289,17 @@ def _defender_set_play_spot(context: Context, ball, lateral: float) -> tuple[flo
     return _keep_clear_of_ball(context, ball, (tx, ty))
 
 
+def _dist_point_to_line(
+    px: float, py: float, ax: float, ay: float, bx: float, by: float,
+) -> float:
+    """点 (px,py) 到直线 ab 的垂直距离;ab 退化时返回点距 a 的距离。"""
+    dx, dy = bx - ax, by - ay
+    n = math.hypot(dx, dy)
+    if n < 1e-6:
+        return math.hypot(px - ax, py - ay)
+    return abs(dx * (ay - py) - dy * (ax - px)) / n
+
+
 def _set_play_kick_plan(
     context: Context, set_play: SetPlay, ball, taker_id: int | None = None,
     active_ids: set[int] | None = None,
@@ -320,46 +331,70 @@ def _set_play_kick_plan(
             target = (gx, gy)
             power = KICK_POWER_SET_PLAY_SHOT
     else:
-        # 界外球/球门球/间接任意球:需二次触球才能进球。第一脚短传给最近的
-        # 队友,由队友完成第二次触球后再进攻;没有队友可传时退化为向前推。
+        # 界外球/球门球/间接任意球:需二次触球才能进球。第一脚短传给合格队友;
+        # 没有合格队友时退化为横向轻推。
+        half_w = context.field.width / 2.0
+        goal_line_limit = half_length - SET_PLAY_PASS_GOAL_LINE_GAP_M
         mate = None
         best = math.inf
+        target = None
         for mate_id, mate_state in context.teammates.items():
             if mate_id == taker_id or mate_state.pose is None:
                 continue
             if active_ids is not None and mate_id not in active_ids:
                 continue
             d = dist(ball.x, ball.y, mate_state.pose.x, mate_state.pose.y)
-            if d < best:
-                best = d
-                mate = mate_state
-        if mate is not None and best > 0.8:
-            # v2.3:短传落点里收、避边线至少 1.2m,并把 y 向中路拉,降低
-            # 「界外球/球门球第一脚把球踢出界 → set_play_retake」的概率。
-            half_w = context.field.width / 2.0
-            tx = clamp(mate.pose.x, -half_length + 1.2, half_length - 1.2)
-            ty = mate.pose.y
+            if d <= 0.8 or d >= best:
+                continue
+            # v2.3:落点里收、避边线至少 1.2m,y 向中路拉,降低第一脚出界 retake。
+            tx = clamp(mate_state.pose.x, -half_length + 1.2, half_length - 1.2)
+            ty = mate_state.pose.y
             if abs(ty) > half_w - 1.5:
                 ty = 0.6 * ty
             # v2.6:落点必须比球更靠前(球门方向),且不能深到己方半场深处。
-            tx = max(tx, ball.x + 1.0, -1.0)
+            if ball.x < 4.0:
+                tx = max(tx, ball.x + 1.0)
+            tx = max(tx, -1.0)
+            # v2.7:间接球第一脚不许直接/折射进门 —— 落点离对方门线至少 2m,
+            # 且不能落在「球→对方门中心」的射门线上。
+            tx = min(tx, goal_line_limit)
             tx = clamp(tx, -half_length + SET_PLAY_TARGET_MARGIN_M,
                        half_length - SET_PLAY_TARGET_MARGIN_M)
             ty = clamp(ty, -half_w + 1.2, half_w - 1.2)
+            if _dist_point_to_line(tx, ty, ball.x, ball.y, gx, gy) < SET_PLAY_PASS_OFFLINE_M:
+                continue
+            best = d
+            mate = mate_state
             target = (tx, ty)
-            pass_dist = dist(ball.x, ball.y, tx, ty)
+        if mate is not None:
+            pass_dist = dist(ball.x, ball.y, target[0], target[1])
             power = clamp(
                 SET_PLAY_PASS_POWER_BASE + SET_PLAY_PASS_POWER_PER_M * pass_dist,
                 SET_PLAY_PASS_POWER_MIN,
                 SET_PLAY_PASS_POWER_MAX,
             )
         else:
-            target = (
-                min(ball.x + SET_PLAY_FORWARD_M, half_length - SET_PLAY_TARGET_MARGIN_M),
-                clamp(ball.y * 0.4, -2.4, 2.4),
-            )
-            power = KICK_POWER_SET_PLAY_FORWARD
+            # v2.7:没有合格队友时不向前长踢(第一脚直接进门会被判无效),改为
+            # 朝中路的横向轻推,方向与对方门垂直,力度 <=3.5。
+            push_y = ball.y + (2.0 if ball.y <= 0.0 else -2.0)
+            target = (ball.x, clamp(push_y, -half_w + 1.2, half_w - 1.2))
+            power = SET_PLAY_LATERAL_POWER
     return angle_to(ball.x, ball.y, target[0], target[1]), power
+
+
+def _ball_speed_mps(context: Context, store) -> float | None:
+    """用上一帧球位置差分估算球速(m/s);首帧或断帧返回 None。"""
+    ball = context.ball
+    if ball is None:
+        return None
+    prev = getattr(store, "ball_prev", None)
+    store.ball_prev = (ball.x, ball.y, context.now)
+    if prev is None:
+        return None
+    dt = context.now - prev[2]
+    if dt <= 1e-3 or dt > 0.5:
+        return None
+    return dist(prev[0], prev[1], ball.x, ball.y) / dt
 
 
 def _act_normal(context: Context, players: list[Player], store) -> None:
@@ -399,7 +434,35 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     attacker: Player | None = None
     primary_pose: tuple[float, float] | None = None
     rest: list[Player] = []
-    if field_players:
+    # v2.7:活球「站桩」修复(P0)。线上复盘:球速≈0、我方非门将无人进 1.2m 时
+    # 常没人去抢(最近者 0.7-0.9m 却因绕球/角色停在旁边),白给对手断球。这里
+    # 在开放球权 + 球几乎静止 + 无人贴近时,强制最近的非门将做 presser。
+    game = context.game
+    speed = _ball_speed_mps(context, store)
+    forced_presser: Player | None = None
+    if (
+        field_players
+        and speed is not None
+        and speed < PRESSER_STALL_SPEED_MPS
+        and game is not None
+        and game.state == GameState.PLAYING
+        and not game.stopped
+        and (game.set_play is None or game.set_play == SetPlay.NONE)
+    ):
+        near = min(
+            field_players, key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
+        )
+        if dist(near.pose.x, near.pose.y, ball.x, ball.y) > PRESSER_TRIGGER_DIST_M:
+            forced_presser = near
+    if forced_presser is not None:
+        attacker = forced_presser
+        store.normal_attacker = attacker.id
+        attacker.action = "pressing"
+        attacker.attack()
+        if attacker.pose is not None:
+            primary_pose = (attacker.pose.x, attacker.pose.y)
+        rest = [p for p in field_players if p is not attacker]
+    elif field_players:
         attacker = _select_closest_attacker(
             context, field_players, getattr(store, "normal_attacker", None),
         )
@@ -710,8 +773,9 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
     v2.6:线上 20c6a6cb(1:2 负)3 张 stopped_motion(sim 204/521/670s,0.301-0.330m)
     的根因是窗口结束后这里只 `continue` 不发命令,机器人保留上一帧速度指令滑行;
     现在:①记录 stopped_since 时回拨 0.35s 补偿 GameControl 发布延迟;②窗口
-    0.35s、速度 1.0m/s;③只撤离「距球 <1.8m 的我方非门将」;④窗口结束后对
-    所有球员(含撤离名单)显式 p.stop(),目标摆球期 0 罚单。
+    0.35s、速度 1.0m/s;③只撤离「距球 <1.8m 的我方非门将」;④窗口结束后撤离
+    名单不再硬停(v2.7:硬停到主罚触球会吃 R-07),改为 0.12m/s 径向慢爬,其余
+    球员显式 p.stop(),目标摆球期 0 罚单。
     我方定位球摆球时不移动;SET 阶段一律静止。
     """
     g = context.game
@@ -752,12 +816,19 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
             and p.id != keeper_id
         ):
             d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
-            if d_ball < RESTART_AVOID_RADIUS_M + 0.35 and elapsed <= STOP_VACATE_WINDOW_S:
+            if d_ball < RESTART_AVOID_RADIUS_M + 0.35:
                 target = _away_from_ball_point(
                     context, ball, p.pose, RESTART_AVOID_RADIUS_M + 0.55
                 )
-                p.action = "stopped:vacate"
-                p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
+                if elapsed <= STOP_VACATE_WINDOW_S:
+                    p.action = "stopped:vacate"
+                    p.omni_move_toward(target, speed=STOP_VACATE_SPEED)
+                else:
+                    # v2.7:窗口过后不再硬停(硬停到主罚触球会吃 R-07),改为沿
+                    # 「球→机器人」径向以 0.12m/s 慢爬:径向远离满足 R-07 豁免,
+                    # 2s 位移 0.24m < 0.3m 不触发 M-02;直到 stopped=False 才停。
+                    p.action = "stopped:crawl"
+                    p.omni_move_toward(target, speed=STOP_CRAWL_SPEED)
                 continue
         p.action = "stopped"
         p.stop()

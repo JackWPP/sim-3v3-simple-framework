@@ -759,7 +759,28 @@ class Player:
                 self.stop()
                 return
             kick_direction, kick_power = coord_plan
-            self.kick(kick_direction, kick_power)
+            # v2.7:踢球任务只在「机器人已在球后方(朝射门方向)」时启动;否则先
+            # 绕到球后侧再踢。analyst b4c9a02e 4 例:机器人距球 0.74-0.83m 就
+            # 直接 kick,kick 任务走位不收敛、满速漂走 0.7-1.8m,2-4s 不触球。
+            dx_b = ball.x - self.pose.x
+            dy_b = ball.y - self.pose.y
+            to_ball = math.hypot(dx_b, dy_b)
+            aim_x, aim_y = math.cos(kick_direction), math.sin(kick_direction)
+            aligned = to_ball <= KICK_ALIGN_NEAR_M or (
+                to_ball > 1e-6
+                and (dx_b * aim_x + dy_b * aim_y) / to_ball > KICK_ALIGN_DOT_MIN
+            )
+            if aligned:
+                self.action = "attack:kick"
+                self.kick(kick_direction, kick_power)
+            else:
+                self.action = "attack:align"
+                behind = _behind_ball(
+                    ball.x, ball.y,
+                    (ball.x + aim_x * 2.0, ball.y + aim_y * 2.0),
+                    CHASE_BEHIND_M,
+                )
+                self.walk_to(behind, avoid_ball=False)
         else:
             self.release_kick()
             half_l = self.context.field.length / 2.0
@@ -825,10 +846,9 @@ class Player:
             if ball.x < 0.0:
                 cover_gain = 1.0  # v2.5:按球 y 全量跟随
                 cover_lim = 1.15
-                inset = KEEPER_LINE_INSET_M
-                if ball.x < KEEPER_DEEP_BALL_X:
-                    inset = 0.05
-                home = (-(half_l - inset), home[1])
+                # v2.7:站位 x 不许比 -(half_l-KEEPER_LINE_INSET_M) 更靠外。v2.4
+                # 第 4 球的 keeper 追球追到 x=-7.36(门线外)才让球从身侧滚进。
+                home = (-(half_l - KEEPER_LINE_INSET_M), home[1])
             else:
                 cover_gain = KEEPER_TRACK_GAIN_FAR
                 cover_lim = KEEPER_TRACK_Y_LIMIT_FAR
@@ -844,7 +864,11 @@ class Player:
         if ball is not None and open_play:
             d_ball = dist(self.pose.x, self.pose.y, ball.x, ball.y)
             if d_ball < KEEPER_CLEAR_RADIUS_M:
-                clear_dir = angle_to(ball.x, ball.y, 1.5, clamp(ball.y * 0.5, -2.0, 2.0))
+                # v2.7:解围方向固定朝对方半场(禁止朝己方门);仍带 y 校准,
+                # 让球踢向中路而不是边线。
+                clear_dir = angle_to(
+                    ball.x, ball.y, half_l * 0.6, clamp(ball.y * 0.3, -2.0, 2.0)
+                )
                 self.action = "guard:clear"
                 self.kick(clear_dir, KEEPER_CLEAR_POWER)
                 return

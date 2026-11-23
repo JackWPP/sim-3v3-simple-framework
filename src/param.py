@@ -60,8 +60,14 @@ ANGULAR_GAIN = 2.0             # 转向 P 增益
 # Player 踢球 / 射门规划
 # ======================================================================
 
-KICK_ENTER_M = 2.0             # 距球小于该值进入踢球状态
-KICK_EXIT_M = 2.5              # 踢球中距球大于该值才退出踢球状态
+# v2.7:ENTRY 2.0→1.0 / EXIT 2.5→1.6。analyst 复盘 4 个「球静止 2-4s」时刻:
+# 机器人距球 0.74-0.83m 就启动 kick 任务,但 kick 走位在绕球时不收敛、满速漂走
+# 0.7-1.8m,2-4s 不触球。收小启动距离 + 留 0.6m 滞回(EXIT>ENTER)防抖动。
+KICK_ENTER_M = 1.0             # 距球小于该值进入踢球状态
+KICK_EXIT_M = 1.6              # 踢球中距球大于该值才退出踢球状态
+# v2.7:启动 kick 前先确认机器人已在球后方(球→射门方向),否则先绕到球后侧。
+KICK_ALIGN_DOT_MIN = 0.2       # dot(机器人→球, 射门方向) 阈值
+KICK_ALIGN_NEAR_M = 0.5        # 已贴球(该距离内)时直接踢,不再绕
 CHASE_BEHIND_M = 0.35          # 追球时站到球后方的距离
 
 
@@ -168,6 +174,12 @@ SET_PLAY_PASS_POWER_BASE = 3.0
 SET_PLAY_PASS_POWER_PER_M = 0.25
 SET_PLAY_PASS_POWER_MIN = 3.0
 SET_PLAY_PASS_POWER_MAX = 4.5
+# v2.7:间接球第一脚禁止「直接/折射进门被判无效」:落点距对方门线至少该值(m),
+# 且离「球→对方门中心」的射门线至少 SET_PLAY_PASS_OFFLINE_M(m);没有合格队友时
+# 改为朝中路的横向轻推,力度 <=3.5。
+SET_PLAY_PASS_GOAL_LINE_GAP_M = 2.0
+SET_PLAY_PASS_OFFLINE_M = 1.0
+SET_PLAY_LATERAL_POWER = 3.2
 
 # ======================================================================
 # 站位 / 避让
@@ -262,4 +274,12 @@ STOP_VACATE_SPEED = 1.0
 # v2.6:GameControl 状态发布有 0~0.5s 延迟,记录 stopped_since 时回拨该补偿,
 # 让宽限窗口对齐裁判的真实计时点(否则宽限整体右移、刹车指令发晚)。
 STOP_STATE_LATENCY_COMP_S = 0.35
-STOP_CRAWL_SPEED = 0.0
+# v2.7:窗口过后不再硬停,而是沿「球→机器人」径向以该速度继续外移(R-07 豁免:
+# 径向远离 >=0.05m/s;2s 位移 0.24m < 0.3m 不触发 M-02),直到 stopped=False。
+# 第 2 场 0 罚后复盘提示:硬停会让仍在 1.45m 内的机器人在主罚触球瞬间吃 R-07。
+STOP_CRAWL_SPEED = 0.12
+# v2.7:活球「站桩」修复(P0)。球几乎静止且我方非门将无人进入 1.2m 时,
+# 强制最近的非门将去抢(绕过 support/粘滞选择)。线上 dffb89db/b4c9a02e
+# 复盘:球静止 2-4s、最近人 0.74-0.83m 站着不抢,白给对手断球/补射。
+PRESSER_STALL_SPEED_MPS = 0.2
+PRESSER_TRIGGER_DIST_M = 1.2
