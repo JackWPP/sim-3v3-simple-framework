@@ -313,7 +313,7 @@ KEEPER_CLEAR_MAX_BALL_SPEED_MPS = 0.6
 # 球贴边线/门线时该点落在场外,后端绕不过去→反复起停(第15场3个失球同根)。
 # kick 前校验后侧点是否在场内(留 0.15m 余量),出界则按角度步进旋向场内候选方向。
 KICK_BEHIND_OFFSET_M = 0.45
-KICK_BEHIND_MARGIN_M = 0.15
+KICK_BEHIND_MARGIN_M = 0.02
 
 # v2.2:对方定位球摆球期间的撤离节奏。
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
@@ -408,3 +408,11 @@ DATA_LOSS_PATROL_SPEED = 0.12     # m/s;任意 2s 窗口位移 ≤0.24m
 DATA_LOSS_PATROL_STEP_M = 0.6     # 巡逻目标点相对自身的距离
 DATA_LOSS_PATROL_FLIP_S = 2.0     # 换向周期(s)
 DATA_LOSS_APPROACH_M = 1.2        # 距最后已知球位小于该值后转入巡逻
+
+# v2.25(Lead m03269 ②/analyst 第23场): 贴边线球处理——非门将最近者从场内
+# 一侧接近、朝场内踢,踢完立刻朝场内退 2.0m;避免「追到就触球」后把自己
+# 留在出界点(裁判把对方界外球摆到脚下 0.25m → R-06 defender_touched_before_kick)。
+TOUCHLINE_GUARD_M = 0.7        # |ball.y| > half_w - 0.7 视为贴边线
+TOUCHLINE_APPROACH_M = 0.55    # 从场内一侧接近的偏移(站在球内侧)
+TOUCHLINE_KICK_DIST_M = 0.65   # 距球 ≤0.65m 才起脚
+TOUCHLINE_RETREAT_M = 2.0      # 踢完朝场内退的距离

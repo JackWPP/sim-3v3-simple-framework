@@ -117,6 +117,8 @@ class Player:
         self._guard_threatened: bool = False
         # 门线撞球进门迟滞状态
         self._goal_line_push: bool = False
+        # v2.25: 贴边线球「踢完朝场内退」的撤退目标(None=未触发)
+        self._touchline_retreat: tuple[float, float] | None = None
         # v2.17: 门将过线点预测用的球速差分缓存;解围卡死自恢复计时。
         self._ball_prev: tuple[float, float, float] | None = None
         self._clear_kick_started: float | None = None
@@ -216,6 +218,30 @@ class Player:
 
         if behind_inside(direction):
             return direction
+        # v2.25(analyst 第21场 §5.1): 组件级夹取替代「整方向 ±0.35rad 外旋搜索」。
+        # 旧逻辑在贴线球位(如 ball.y=4.45 > lim_y=4.35)会把合法的「内传」方向
+        # 整支旋成朝边线外,我方界外球/角球 0.1s 自出界 → 对方同点摆球 →
+        # taker 仍在原地被摆球判 R-06(defender_set_play_interference)。
+        # 现在只夹「会导致后侧点出界的分量」,保留另一分量不变。
+        def _axis_bounds(ball_c: float, off: float, lim: float):
+            lo = max((ball_c - lim) / off, -1.0)
+            hi = min((ball_c + lim) / off, 1.0)
+            if lo > hi:
+                return None
+            return lo, hi
+
+        bx_b = _axis_bounds(ball.x, KICK_BEHIND_OFFSET_M, lim_x)
+        by_b = _axis_bounds(ball.y, KICK_BEHIND_OFFSET_M, lim_y)
+        if bx_b is not None and by_b is not None:
+            ux = clamp(math.cos(direction), bx_b[0], bx_b[1])
+            uy = clamp(math.sin(direction), by_b[0], by_b[1])
+            norm = math.hypot(ux, uy)
+            if norm > 1e-6:
+                ux, uy = ux / norm, uy / norm
+                cand = math.atan2(uy, ux)
+                # 夹取+归一化后仍须验证后侧点在场内;己方半场禁止明显朝己门。
+                if behind_inside(cand) and not (ball.x < 0.0 and ux < -0.2):
+                    return cand
         for step in (0.35, 0.7, 1.05, 1.4, 1.75, 2.1, 2.45, 2.8, 3.14):
             for sign in (1.0, -1.0):
                 cand = normalize_angle(direction + sign * step)
@@ -820,6 +846,49 @@ class Player:
                 face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
                 avoid_ball=False,
                 avoid_robots=True,
+            )
+            return
+
+        # v2.25(Lead m03269 ②/analyst 第23场): 贴边线球从场内一侧接近、朝场内
+        # 踢,踢完立刻朝场内退 2.0m。第23场 480.9: 我方在边线 y≈4.5 碰球出界后
+        # 留在出界点,裁判 3s 后把对方 throw_in 摆到脚下 0.25m(<接触半径),
+        # stopped 期 crawl 0.02m/s 逃不出 → R-06。注意不能全员远离活球(30s
+        # game_stuck):本分支始终会接近并起脚,只是踢完先退场再回位。
+        d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
+        if abs(ball.y) > half_w - TOUCHLINE_GUARD_M:
+            inward = -1.0 if ball.y > 0.0 else 1.0
+            if self._touchline_retreat is not None:
+                rx, ry = self._touchline_retreat
+                if math.hypot(self.pose.x - rx, self.pose.y - ry) < 0.4:
+                    self._touchline_retreat = None
+                else:
+                    self.action = "attack:touchline_retreat"
+                    self.walk_to(
+                        (clamp(rx, -half_l + 1.5, half_l - 1.5),
+                         clamp(ry, -half_w + 1.2, half_w - 1.2)),
+                        face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
+                        avoid_ball=True,
+                        avoid_robots=True,
+                    )
+                    return
+            if d > TOUCHLINE_KICK_DIST_M:
+                self.action = "attack:touchline_approach"
+                self.walk_to(
+                    (clamp(ball.x, -half_l + 1.2, half_l - 1.2),
+                     clamp(ball.y + inward * TOUCHLINE_APPROACH_M,
+                           -half_w + 0.55, half_w - 0.55)),
+                    face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),
+                    avoid_ball=False,
+                    avoid_robots=True,
+                )
+                return
+            aim_x = ball.x + (2.0 if ball.x < 0.0 else -2.0)
+            aim_y = ball.y + inward * 2.5
+            self.action = "attack:touchline_clear"
+            self.kick(angle_to(ball.x, ball.y, aim_x, aim_y), KICK_POWER_CLEAR)
+            self._touchline_retreat = (
+                clamp(ball.x + (0.5 if ball.x < 0.0 else -0.5), -half_l + 1.5, half_l - 1.5),
+                clamp(ball.y + inward * TOUCHLINE_RETREAT_M, -half_w + 1.2, half_w - 1.2),
             )
             return
 
