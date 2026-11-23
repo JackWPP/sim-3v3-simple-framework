@@ -324,12 +324,15 @@ def _set_play_kick_plan(
             if d < best:
                 best = d
                 mate = mate_state
-        if mate is not None and best > 0.6:
-            target = (
-                clamp(mate.pose.x, -half_length + 0.6, half_length - 0.6),
-                clamp(mate.pose.y, -context.field.width / 2.0 + 0.6,
-                       context.field.width / 2.0 - 0.6),
-            )
+        if mate is not None and best > 0.8:
+            # v2.3:短传落点里收、避边线至少 1.2m,并把 y 向中路拉,降低
+            # 「界外球/球门球第一脚把球踢出界 → set_play_retake」的概率。
+            half_w = context.field.width / 2.0
+            tx = clamp(mate.pose.x, -half_length + 1.2, half_length - 1.2)
+            ty = mate.pose.y
+            if abs(ty) > half_w - 1.5:
+                ty = 0.6 * ty
+            target = (tx, clamp(ty, -half_w + 1.2, half_w - 1.2))
             power = KICK_POWER_SET_PLAY_PASS
         else:
             target = (

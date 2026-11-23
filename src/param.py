@@ -35,7 +35,7 @@ KICK_POWER_OUR_KICKOFF_PASS = 4.2  # 开球第一脚短传给队友(直接射门
 KICK_POWER_SET_PLAY_FORWARD = 5.0
 # 定位球:可以直接射门的类型(角球/直接任意球/点球)的射门力度。
 KICK_POWER_SET_PLAY_SHOT = 8.0
-KICK_POWER_SET_PLAY_PASS = 4.0   # 需二次触球的定位球(界外球/球门球/间接任意球)第一脚短传给队友
+KICK_POWER_SET_PLAY_PASS = 3.6   # 需二次触球的定位球(界外球/球门球/间接任意球)第一脚短传给队友
 
 # 我方定位球:向前推进的目标距离(m),以及目标点离边线/底线的安全余量(m)。
 SET_PLAY_FORWARD_M = 4.0
@@ -228,7 +228,7 @@ KEEPER_TRACK_Y_LIMIT_FAR = 0.8
 # (前插会被边线 clamp 后停在对方角旗附近,10s 不动吃 inactiveRobot 罚单)。
 SUPPORT_TRAIL_M = 2.6
 SUPPORT_TRAIL_LATERAL_M = 2.0
-SUPPORT_OFFENSE_X = 2.5
+SUPPORT_OFFENSE_X = 0.8
 SUPPORT_MIN_BALL_SAFE_M = 3.15
 # 射门收敛:瞄得更靠门内(0.45),上限力度 7.5,减少打飞/打偏出底线。
 SHOOT_POWER_MAX = 7.5     # 射门力度上限(降低打飞出底线概率)
