@@ -260,11 +260,20 @@ class Player:
             if dd < nearest_opp_dist:
                 nearest_opp_dist, nearest_opp = dd, op
 
-        # 己方半场被贴身逼抢:向前解围,别在门前横传。
+        # v2.12(P0-a): 己方三区一律直接解围,优先于绕位/推进。第 7 场两个失球
+        # 都是己方三区静止球(144.4-146.5/549.9-552.5),我方最近者绕位 1.5s
+        # 不触球、被对手 0.35m 先捅。方向朝对方半场边线(避免中路送二点)。
+        if ball.x < OWN_THIRD_CLEAR_BALL_X:
+            side = 1.0 if ball.y >= 0.0 else -1.0
+            self.action = "attack:own_third_clear"
+            return angle_to(ball.x, ball.y, 0.0, side * (half_w - 1.2)), KICK_POWER_CLEAR
+
+        # 己方半场被贴身逼抢:向前解围,别在门前横传。v2.12(P1): 落点改朝边线,
+        # 避免解围从对方底线出界白送门球(第 7 场 2 次)或中路送二点。
         if ball.x < -1.0 and nearest_opp_dist < 1.4:
             side = 1.0 if ball.y >= 0.0 else -1.0
-            clear_x = half_l - 1.2
-            clear_y = side * (half_w - 1.2)
+            clear_x = half_l - KICK_CLEAR_TARGET_X_FROM_GOAL
+            clear_y = side * (half_w - KICK_CLEAR_LATERAL_MARGIN_M)
             self.action = "attack:clear"
             return angle_to(ball.x, ball.y, clear_x, clear_y), KICK_POWER_CLEAR
 

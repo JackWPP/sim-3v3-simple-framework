@@ -280,7 +280,19 @@ STOP_CRAWL_SPEED = 0.0
 # 强制最近的非门将去抢(绕过 support/粘滞选择)。线上 dffb89db/b4c9a02e
 # 复盘:球静止 2-4s、最近人 0.74-0.83m 站着不抢,白给对手断球/补射。
 PRESSER_STALL_SPEED_MPS = 0.2
-PRESSER_TRIGGER_DIST_M = 1.2
+# v2.12: 1.2→1.8(Lead):球停且最近者仍远时更早强制施压,避免全员看着静止球。
+PRESSER_TRIGGER_DIST_M = 1.8
+
+# v2.12: 己方三区直接解围(Lead/analyst:第7场两个失球同型——己方三区静止球,
+# 我方最近者绕位1.5s不触球,对手0.35m先捅)。x < 该值即视为己方三区。
+OWN_THIRD_CLEAR_BALL_X = -3.5
+# v2.12: 死球解围时先站到球的门侧,再起脚。
+PRESSER_DEADBALL_APPROACH_M = 0.45
+
+# v2.12(P1): 清球落点改朝边线(避免中路送二点/底线送对方门球)。
+# 落点 x = half_l - KICK_CLEAR_TARGET_X_FROM_GOAL,y = ±(half_w - 该余量)。
+KICK_CLEAR_TARGET_X_FROM_GOAL = 2.2
+KICK_CLEAR_LATERAL_MARGIN_M = 0.2
 
 # v2.9:开球期非主罚不得原地 stay 站桩。第 4 场 f751146f 我方 7 张罚单全部
 # inactiveRobot:开球 phase 里非主罚按旧逻辑 stop() 站住,主罚触球后球滚到

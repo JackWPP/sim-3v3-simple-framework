@@ -564,8 +564,45 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     if forced_presser is not None:
         attacker = forced_presser
         store.normal_attacker = attacker.id
-        attacker.action = "pressing"
-        attacker.attack()
+        # v2.12(P0-a): 己方三区死球不再绕位,直接站到球的门侧再解围。第 7 场
+        # sim 148.31/554.53 两失球同型:三区静止球,我方最近者绕位 1.5s 不触球,
+        # 对手 0.35m 先捅;解围方向朝对方半场边线(不在门前横传)。
+        if (
+            ball is not None
+            and speed is not None
+            and ball.x < OWN_THIRD_CLEAR_BALL_X
+            and speed < PRESSER_STALL_SPEED_MPS
+        ):
+            gx, gy = own_goal(context)
+            ux, uy = gx - ball.x, gy - ball.y
+            un = math.hypot(ux, uy)
+            if un > 1e-6:
+                ux, uy = ux / un, uy / un
+            else:
+                ux, uy = -1.0, 0.0
+            ax = ball.x + PRESSER_DEADBALL_APPROACH_M * ux
+            ay = ball.y + PRESSER_DEADBALL_APPROACH_M * uy
+            if (
+                attacker.pose is not None
+                and dist(attacker.pose.x, attacker.pose.y, ax, ay) > 0.25
+            ):
+                attacker.action = "pressing:clear_approach"
+                attacker.walk_to(
+                    _field_point(context, ax, ay, 0.4),
+                    avoid_ball=False,
+                    avoid_robots=True,
+                )
+            else:
+                side = 1.0 if ball.y >= 0.0 else -1.0
+                half_w = context.field.width / 2.0
+                attacker.action = "pressing:clear"
+                attacker.kick(
+                    angle_to(ball.x, ball.y, 0.0, side * (half_w - 1.2)),
+                    KICK_POWER_CLEAR,
+                )
+        else:
+            attacker.action = "pressing"
+            attacker.attack()
         if attacker.pose is not None:
             primary_pose = (attacker.pose.x, attacker.pose.y)
         rest = [p for p in field_players if p is not attacker]
