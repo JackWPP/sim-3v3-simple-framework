@@ -75,3 +75,9 @@ python3 tools/check_names.py
 python3 -u tools/matchrun.py --tag iteration-NN --max-wait 1200
 python3 tools/analyze_match.py docs/kb/logs/iteration-NN.json
 ```
+
+- `docs/kb/online-loop.md`：线上迭代闭环（token 获取/代码提交/挑战/回放复盘/协同指标）
+- `tools/online_submit.py`：上传 .agent 并设为默认参赛代码
+- `tools/online_challenge.py`：发起 Arena 3v3 挑战（自动匹配/指定选手）
+- `tools/online_match_fetch.py`：下载线上对局详情 + 回放 manifest + segments
+- `tools/online_replay_analyze.py`：回放统计与协同指标分析

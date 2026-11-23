@@ -229,6 +229,95 @@ class Player:
         self._kicking = True
         self._backend.kick(direction_body, power_clamped, ball_x_body, ball_y_body)
 
+    def _coordinated_kick_plan(self) -> tuple[float, float] | None:
+        """协同进攻踢球决策(v2.0):近门射门 / 推进带球 / 被逼抢解围。
+
+        线上 replay 分析(11-22 1:2、0:9、0:3 三场)发现:旧逻辑只要进入踢球
+        距离就朝对方球门开大脚,力度随距离增大,球权在几秒内就丢回给对方,
+        既形不成射门也把阵型拉开。这里按距离分三种处理:
+        - 距球门 <= SHOOT_RANGE_M:瞄准远离对方门将的一侧门内射门;
+        - 更远:向对方球门方向短推 PROGRESS_AHEAD_M(避让最近对手),保持球权;
+        - 己方半场且被对手贴身:朝对方半场边线大力解围。
+        """
+        ctx = self.context
+        ball = ctx.ball if ctx is not None else None
+        if ctx is None or ball is None:
+            return None
+
+        half_l = ctx.field.length / 2.0
+        half_w = ctx.field.width / 2.0
+        goal_x, goal_y = opponent_goal(ctx)
+        dist_goal = math.hypot(goal_x - ball.x, goal_y - ball.y)
+
+        opp_poses: list[Pose2D] = []
+        for opp in (ctx.opponents or {}).values():
+            if opp.pose is not None:
+                opp_poses.append(opp.pose)
+        nearest_opp: Pose2D | None = None
+        nearest_opp_dist = math.inf
+        for op in opp_poses:
+            dd = math.hypot(op.x - ball.x, op.y - ball.y)
+            if dd < nearest_opp_dist:
+                nearest_opp_dist, nearest_opp = dd, op
+
+        # 己方半场被贴身逼抢:向前解围,别在门前横传。
+        if ball.x < -1.0 and nearest_opp_dist < 1.4:
+            side = 1.0 if ball.y >= 0.0 else -1.0
+            clear_x = half_l - 1.2
+            clear_y = side * (half_w - 1.2)
+            self.action = "attack:clear"
+            return angle_to(ball.x, ball.y, clear_x, clear_y), KICK_POWER_CLEAR
+
+        # 近门:射门。瞄向远离对方门将的一侧门内。
+        if dist_goal <= SHOOT_RANGE_M:
+            their_keeper: Pose2D | None = None
+            keeper_dist = math.inf
+            for op in opp_poses:
+                kd = math.hypot(op.x - goal_x, op.y - goal_y)
+                if kd < keeper_dist:
+                    keeper_dist, their_keeper = kd, op
+            # 门柱内侧:门半宽 1.3,瞄 ±(1.3-0.35)=±0.95,朝远离对方门将的一侧。
+            aim_abs = max(0.5, ctx.field.goal_width / 2.0 - SHOOT_TARGET_INSET_M)
+            if their_keeper is not None and their_keeper.y > 0.0:
+                aim_y = -aim_abs
+            elif their_keeper is not None and their_keeper.y < 0.0:
+                aim_y = aim_abs
+            else:
+                aim_y = aim_abs if ball.y <= 0.0 else -aim_abs
+            aim_x = goal_x - 0.15
+            power = clamp(
+                KICK_POWER_SHOOT_BASE
+                + KICK_POWER_PER_M * (SHOOT_RANGE_M - dist_goal),
+                KICK_POWER_SHOOT_BASE,
+                SHOOT_POWER_MAX,
+            )
+            self.action = "attack:shoot"
+            return angle_to(ball.x, ball.y, aim_x, aim_y), power
+
+        # 远距离:短推推进。目标点 = 球向对方门方向 PROGRESS_AHEAD_M,
+        # 若最近对手压在该方向上,则沿垂直方向让开再推进。
+        dx, dy = goal_x - ball.x, goal_y - ball.y
+        norm = math.hypot(dx, dy)
+        if norm < 1e-6:
+            return None
+        ux, uy = dx / norm, dy / norm
+        px = ball.x + ux * PROGRESS_AHEAD_M
+        py = ball.y + uy * PROGRESS_AHEAD_M
+        if nearest_opp is not None:
+            # 若推进路线上对手太近,把目标点沿垂直方向偏一点。
+            if math.hypot(nearest_opp.x - px, nearest_opp.y - py) < 0.9:
+                for sign in (1.0, -1.0):
+                    cx = px - uy * sign * 1.4
+                    cy = py + ux * sign * 1.4
+                    if (math.hypot(nearest_opp.x - cx, nearest_opp.y - cy)
+                            > math.hypot(nearest_opp.x - px, nearest_opp.y - py)):
+                        px, py = cx, cy
+                        break
+        px = clamp(px, -half_l + 0.8, half_l - 0.8)
+        py = clamp(py, -half_w + 0.8, half_w - 0.8)
+        self.action = "attack:progress"
+        return angle_to(ball.x, ball.y, px, py), KICK_POWER_DRIBBLE
+
     def plan_kick(self) -> tuple[float, float] | None:
         """计算踢球方向和力度。
 
@@ -665,11 +754,11 @@ class Player:
                 self.action = "attack:line_clear"
                 self.kick(angle_to(ball.x, ball.y, 0.0, 0.0), KICK_POWER_LINE_CLEAR)
                 return
-            kick_plan = self.plan_kick()
-            if kick_plan is None:
+            coord_plan = self._coordinated_kick_plan()
+            if coord_plan is None:
                 self.stop()
                 return
-            kick_direction, kick_power = kick_plan
+            kick_direction, kick_power = coord_plan
             self.kick(kick_direction, kick_power)
         else:
             self.release_kick()
@@ -722,11 +811,20 @@ class Player:
         # 逐步验证(见 docs/kb/iterations.md 的教训段)。
         home = own_goal_area_center(ctx)
 
-        # 门线横移:把球的 y 投影到门线(限制在门柱内侧 ~0.25m),门将始终封住
-        # 「球→门中心」的射门角度。固定站中央时对方从肋部射门几乎必进
-        # (iteration-04/08 末段连续丢球的主要原因之一)。
+        # 门线横移(v2.1):把球 y 投影到门线封射门角度。
+        # 线上 v2.0 3:3 复盘:三个失球都是球横穿门线时门将 y 仍停在旧值
+        # (旧版只按 ball.y*0.65 跟随,折射/横传后差 1.4-1.6m)。改为:
+        # - 球在己方半场(x<0)时按 ball.y 直接跟随(0.9 倍),站位推到门线内侧;
+        # - 球在对方半场时保持保守跟随,避免被远射吊射。
         if ball is not None:
-            cover_y = clamp(ball.y * 0.65, -1.05, 1.05)
+            if ball.x < 0.0:
+                cover_gain = KEEPER_TRACK_GAIN_OWN_HALF
+                cover_lim = KEEPER_TRACK_Y_LIMIT_OWN
+                home = (-(half_l - KEEPER_LINE_INSET_M), home[1])
+            else:
+                cover_gain = KEEPER_TRACK_GAIN_FAR
+                cover_lim = KEEPER_TRACK_Y_LIMIT_FAR
+            cover_y = clamp(ball.y * cover_gain, -cover_lim, cover_lim)
             home = (home[0], cover_y)
 
         # 待命朝向:朝球(便于快速反应);球不可见则朝对方门方向(默认 0)。
@@ -755,61 +853,107 @@ class Player:
         )
         self.walk_to(home, face=face, avoid_ball=True, avoid_robots=True)
 
-    def support(self) -> None:
-        """支援:站在 球→己方门中心 连线上距球 ``SUPPORT_DIST_M`` 处补防。
+    def support(self, primary_pose: tuple[float, float] | None = None) -> None:
+        """协同支援(v2.0):按进攻/防守两种形态跑位,不再和持球人挤球。
 
-        站位点在球与己方门之间的封堵线上。
+        - 进攻形态(球在对方半场方向,ball.x > -1.5):前插到持球人前方的接应点,
+          横向偏移到远离最近对手的一侧,距球 >= SUPPORT_MIN_BALL_DIST_M;
+        - 防守形态:退到「球→己方门」连线上,横向让开中路,且不挤进门将区
+          (x >= SUPPORT_DEF_MIN_X)。
+        线上 1:2 输球 replay 里 19.3% 帧我方两台机器人间距 <1.0m,属于典型
+        挤球;支援必须拉开纵深/宽度。
         """
         ctx = self.context
         if ctx is None:
             self.stop()
             return
-
-        ball = self.context.ball
-        gx, gy = own_goal(ctx)
-        bx, by = (ball.x, ball.y)
-        dx, dy = gx - bx, gy - by
-        d = math.hypot(dx, dy)
-        if d < 1e-6:
-            ux, uy = -1.0, 0.0
-        else:
-            ux, uy = dx / d, dy / d
-        along = min(SUPPORT_DIST_M, d)
-        tx = bx + ux * along
-        ty = by + uy * along
-
-        # 与更靠前的队友(通常是我方进攻者)保持横向分离,避免三台挤在一点被撞倒。
-        # 只在本球员比该队友更靠后时生效,且只沿 y 方向让开,不改纵深。
-        # 注意:context.teammates 的 key 才是机器人 id,RobotState 本身没有 .id 属性
-        # (iteration-13 曾因此每 tick AttributeError 导致全员冻结 0:4)。
-        if self.pose is not None and ctx.teammates:
-            d_self = math.hypot(ball.x - self.pose.x, ball.y - self.pose.y)
-            nearest_mate = None
-            nearest_d = None
-            for mate_id, mate in ctx.teammates.items():
-                if mate_id == self.id or mate.pose is None:
-                    continue
-                mate_d = math.hypot(ball.x - mate.pose.x, ball.y - mate.pose.y)
-                if nearest_d is None or mate_d < nearest_d:
-                    nearest_d = mate_d
-                    nearest_mate = mate
-            if (
-                nearest_mate is not None
-                and nearest_d is not None
-                and nearest_d + 0.5 < d_self
-                and math.hypot(tx - nearest_mate.pose.x, ty - nearest_mate.pose.y)
-                < SUPPORT_SEPARATION_M
-            ):
-                side = 1.0 if ty >= nearest_mate.pose.y else -1.0
-                ty = nearest_mate.pose.y + side * SUPPORT_SEPARATION_M
-
-        # 不越过己方底线(x >= 门线 + 0.3),横向夹进场内
+        ball = ctx.ball
+        if ball is None:
+            self.stop()
+            return
         half_l = ctx.field.length / 2.0
-        half_w = ctx.field.width / 2.0 - 0.3
-        # 纵深保险(x<=-1.5)在 iteration-08 实测让触球数从 40 掉到 18、比分 2:5,
-        # 说明支援压太靠后等于放弃中场;这里回退,支援按球中路附近站位即可。
-        tx = clamp(tx, -half_l + 0.3, half_l)
-        ty = clamp(ty, -half_w, half_w)
+        half_w = ctx.field.width / 2.0
+        gx, gy = own_goal(ctx)
+
+        opp_poses: list[Pose2D] = []
+        for opp in (ctx.opponents or {}).values():
+            if opp.pose is not None:
+                opp_poses.append(opp.pose)
+        nearest_opp: Pose2D | None = None
+        nearest_opp_dist = math.inf
+        for op in opp_poses:
+            dd = math.hypot(op.x - ball.x, op.y - ball.y)
+            if dd < nearest_opp_dist:
+                nearest_opp_dist, nearest_opp = dd, op
+
+        side = 1.0 if ball.y >= 0.0 else -1.0
+        if nearest_opp is not None and abs(nearest_opp.y - ball.y) > 0.3:
+            side = -1.0 if nearest_opp.y > ball.y else 1.0
+
+        if ball.x > SUPPORT_OFFENSE_X:
+            # 球已到对方三区:支援改成「拖后接应」(球后方 2.6m、横向 2m)。
+            # 线上 v2.0 3:3 复盘:支援按「球前 3.2m」推进时会被边线 clamp 到
+            # 对方角旗附近站住,10s 不动吃 inactiveRobot 罚单(robot2 97.8s)。
+            tx = ball.x - SUPPORT_TRAIL_M
+            ty = ball.y + side * SUPPORT_TRAIL_LATERAL_M
+        elif ball.x > -1.5:
+            # 进攻支援:前插接应。
+            tx = ball.x + SUPPORT_AHEAD_M
+            ty = ball.y + side * SUPPORT_LATERAL_M
+            # 距球至少 3.2m,避免球停下来后踩 M-05(3m 内 10s 不动罚下)。
+            if math.hypot(tx - ball.x, ty - ball.y) < SUPPORT_MIN_BALL_DIST_M:
+                away = math.hypot(tx - ball.x, ty - ball.y)
+                if away < 1e-6:
+                    tx, ty = ball.x + SUPPORT_MIN_BALL_DIST_M, ball.y
+                else:
+                    k = SUPPORT_MIN_BALL_DIST_M / away
+                    tx, ty = ball.x + (tx - ball.x) * k, ball.y + (ty - ball.y) * k
+        else:
+            # 防守支援:回到球与己方门之间,横向让开中路,不吃门将区。
+            ddx, ddy = gx - ball.x, gy - ball.y
+            d = math.hypot(ddx, ddy)
+            if d < 1e-6:
+                ux, uy = -1.0, 0.0
+            else:
+                ux, uy = ddx / d, ddy / d
+            along = min(DEFEND_SUPPORT_DIST_M, d)
+            tx = ball.x + ux * along
+            ty = ball.y + uy * along
+            side = 1.0 if ball.y >= 0.0 else -1.0
+            if nearest_opp is not None and abs(nearest_opp.y - ball.y) > 0.3:
+                side = -1.0 if nearest_opp.y > ball.y else 1.0
+            ty += side * SUPPORT_DEF_LATERAL_M
+            tx = max(tx, SUPPORT_DEF_MIN_X)
+
+        # 与 primary(持球人)保持距离,避免两台挤在一点。
+        if primary_pose is not None:
+            dpm = math.hypot(tx - primary_pose[0], ty - primary_pose[1])
+            if dpm < SUPPORT_MIN_MATE_DIST_M:
+                pdx, pdy = tx - primary_pose[0], ty - primary_pose[1]
+                if dpm < 1e-6:
+                    pdx, pdy = 0.0, 1.0
+                k = SUPPORT_MIN_MATE_DIST_M / max(dpm, 1e-6)
+                tx, ty = primary_pose[0] + pdx * k, primary_pose[1] + pdy * k
+
+        # 任何支援位都尽量离球 >= 3.15m:球停在脚下时站着不动会吃 inactiveRobot。
+        d_ball = math.hypot(tx - ball.x, ty - ball.y)
+        if d_ball < SUPPORT_MIN_BALL_SAFE_M:
+            if d_ball < 1e-6:
+                tx, ty = ball.x - SUPPORT_MIN_BALL_SAFE_M, ball.y
+            else:
+                k = SUPPORT_MIN_BALL_SAFE_M / d_ball
+                tx, ty = ball.x + (tx - ball.x) * k, ball.y + (ty - ball.y) * k
+
+        # 到达支援点后球若仍停在附近(比如球被踢向自己),小幅摆动保持活动。
+        if self.pose is not None:
+            d_here = math.hypot(self.pose.x - ball.x, self.pose.y - ball.y)
+            if d_here < GUARD_INACTIVE_BALL_DIST_M:
+                shuffle = int(ctx.now / GUARD_SHUFFLE_PERIOD_S) % 2
+                dy = GUARD_SHUFFLE_DIST_M if shuffle == 0 else -GUARD_SHUFFLE_DIST_M
+                ty = ty + dy
+
+        tx = clamp(tx, -half_l + 0.4, half_l - 0.6)
+        ty = clamp(ty, -half_w + 0.5, half_w - 0.5)
         self.move_to_position((tx, ty))
 
     def take_kickoff(self, kick_target: tuple[float, float] | None = None) -> None:

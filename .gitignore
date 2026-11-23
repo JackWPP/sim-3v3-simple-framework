@@ -160,3 +160,4 @@ MUJOCO_LOG.TXT
 doc-fetch-resources/
 docs/kb/logs/
 tools/__pycache__/
+docs/kb/online-matches/

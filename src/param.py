@@ -129,6 +129,30 @@ OMNI_ESCAPE_SPEED = 1.2
 LINE_HOLD_MAX_S = 6.0        # 球贴边线时最多保持距离等待的时间,超时改为向场内解围
 KICK_POWER_LINE_CLEAR = 4.5  # 贴边线活球解围(向场内)力度
 
+# ======================================================================
+# 协同进攻(v2.0):推进/射门选择与支援跑位
+# ======================================================================
+# 距对方球门该距离内才直接射门;更远时改为短推带球推进,避免无意义大脚把
+# 球权直接交还对方(线上 replay 实测:从任何位置都朝门开大脚,导致球权快速丢失)。
+SHOOT_RANGE_M = 6.5
+# 射门基础力度(再加距离修正,上限 KICK_POWER_CAP)。
+KICK_POWER_SHOOT_BASE = 5.0
+# 射门瞄准点离门柱内侧的距离(m),门半宽 1.3。
+SHOOT_TARGET_INSET_M = 0.45
+# 一次推进(带球)把球往前送的理想距离(m)与力度。
+PROGRESS_AHEAD_M = 3.0
+KICK_POWER_DRIBBLE = 4.2
+# 己方半场被逼抢时的解围力度。
+KICK_POWER_CLEAR = 6.5
+# 支援球员(非门将、非持球人)站位参数。
+SUPPORT_AHEAD_M = 3.2      # 进攻时前插到球前方该距离
+SUPPORT_LATERAL_M = 2.5    # 进攻支援的横向偏移(选远离最近对手一侧)
+SUPPORT_MIN_BALL_DIST_M = 3.2  # 支援点距球至少这么远(避免 M-05 无活动判罚)
+SUPPORT_MIN_MATE_DIST_M = 2.0  # 与 primary 至少这么远(避免挤在一起)
+DEFEND_SUPPORT_DIST_M = 3.0    # 防守时退到球→己方门连线上该距离
+SUPPORT_DEF_MIN_X = -5.2       # 防守支援的最深 x(不要挤进门将区)
+SUPPORT_DEF_LATERAL_M = 1.5    # 防守支援的横向偏移
+
 
 # 我方定位球：主罚距球小于该距离开始踢。
 SET_PLAY_NEAR_BALL_M = 2.2
@@ -190,3 +214,21 @@ PLAN_MAX_OFFSET = math.radians(100)     # 最大偏离目标方向的角度 (rad
 # ======================================================================
 
 KICK_TARGET_MARK_SIZE_M = 0.18
+
+# ---- v2.1 线上复盘后调整:门将封角度 / 支援纵深 / 射门收敛 ----
+# 线上 v2.0 首战 3:3:三个失球都是球横穿门线时门将 y 还停在旧位置(门将只按
+# ball.y*0.65 跟,球一旦被折射/横传就来不及)。改为球在己方半场时按球 y 直接
+# 跟随(0.9 倍),并把门将站位推到门线内侧 0.2m。
+KEEPER_LINE_INSET_M = 0.2
+KEEPER_TRACK_GAIN_OWN_HALF = 0.9
+KEEPER_TRACK_GAIN_FAR = 0.5
+KEEPER_TRACK_Y_LIMIT_OWN = 1.2
+KEEPER_TRACK_Y_LIMIT_FAR = 0.8
+# 进攻支援:球已进入对方三区(x>2.5)时,支援改为「拖后接应」而不是继续前插
+# (前插会被边线 clamp 后停在对方角旗附近,10s 不动吃 inactiveRobot 罚单)。
+SUPPORT_TRAIL_M = 2.6
+SUPPORT_TRAIL_LATERAL_M = 2.0
+SUPPORT_OFFENSE_X = 2.5
+SUPPORT_MIN_BALL_SAFE_M = 3.15
+# 射门收敛:瞄得更靠门内(0.45),上限力度 7.5,减少打飞/打偏出底线。
+SHOOT_POWER_MAX = 7.5     # 射门力度上限(降低打飞出底线概率)

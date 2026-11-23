@@ -355,25 +355,33 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
             p.stop()
         return
 
-    attacker = _select_closest_attacker(
-        context, players, getattr(store, "normal_attacker", None),
-    )
-    store.normal_attacker = attacker.id
-    attacker.action = "attack"
-    attacker.attack()
+    # v2.0 协同分工:先固定 1 台门将(离己方门最近),绝不让门将参与抢球;
+    # 剩下两人里离球最近者当 primary(抢/带/射),最后一人当 support(接应/保护)。
+    # 旧实现「离球最近者 attack,其余里离己方门最近者 guard」在结构上允许门将
+    # 被选为 attacker 而离门出击(线上 replay 已看到门前无人),这里先锁门将。
+    gx, gy = own_goal(context)
+    keeper = min(players, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
+    field_players = [p for p in players if p is not keeper]
+    attacker: Player | None = None
+    primary_pose: tuple[float, float] | None = None
+    rest: list[Player] = []
+    if field_players:
+        attacker = _select_closest_attacker(
+            context, field_players, getattr(store, "normal_attacker", None),
+        )
+        store.normal_attacker = attacker.id
+        attacker.action = "attack"
+        attacker.attack()
+        if attacker.pose is not None:
+            primary_pose = (attacker.pose.x, attacker.pose.y)
+        rest = [p for p in field_players if p is not attacker]
 
-    # guard:剩下人里离己方门最近者(如还有人)
-    rest = [p for p in players if p is not attacker]
-    if rest:
-        gx, gy = own_goal(context)
-        guard = min(rest, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
-        guard.guard()  
-        rest = [p for p in rest if p is not guard]
+    keeper.action = "guard"
+    keeper.guard()
 
-    # support:其余全部
     for p in rest:
         p.action = "support"
-        p.support()
+        p.support(primary_pose)
 
 
 def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
