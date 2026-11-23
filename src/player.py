@@ -192,6 +192,40 @@ class Player:
     # 踢球
     # ------------------------------------------------------------------
 
+    def _safe_kick_direction(self, direction: float) -> float:
+        """v2.21(analyst 第15场 #22): 校验 kick 后侧绕球点是否在场内。
+
+        后端 kick 任务先绕到「球后侧点」(ball - 0.45·dir) 再推球;球贴边线/
+        门线时该点会落在场外,后端绕不过去 → 反复起停(第 15 场 3 个失球同根,
+        G1 界外球 14.9s 长传、G2 门线双人 kick 卡死 4.5s、G3 贴边线 4s 踢不到)。
+        出界时按 ±0.35rad 步进旋向场内候选方向;己方半场禁止明显朝己方门。
+        """
+        ctx = self.context
+        ball = ctx.ball if ctx is not None else None
+        if ball is None or ctx.field is None:
+            return direction
+        half_l = ctx.field.length / 2.0
+        half_w = ctx.field.width / 2.0
+        lim_x = half_l - KICK_BEHIND_MARGIN_M
+        lim_y = half_w - KICK_BEHIND_MARGIN_M
+
+        def behind_inside(angle: float) -> bool:
+            bx = ball.x - math.cos(angle) * KICK_BEHIND_OFFSET_M
+            by = ball.y - math.sin(angle) * KICK_BEHIND_OFFSET_M
+            return abs(bx) <= lim_x and abs(by) <= lim_y
+
+        if behind_inside(direction):
+            return direction
+        for step in (0.35, 0.7, 1.05, 1.4, 1.75, 2.1, 2.45, 2.8, 3.14):
+            for sign in (1.0, -1.0):
+                cand = normalize_angle(direction + sign * step)
+                if not behind_inside(cand):
+                    continue
+                if ball.x < 0.0 and math.cos(cand) < -0.2:
+                    continue
+                return cand
+        return direction
+
     def kick(
         self,
         kick_direction: float | None = None,
@@ -213,6 +247,9 @@ class Player:
                 _log.warning("player %d kick skipped: kick plan unavailable", self.id)
                 return
             kick_direction, power = kick_plan
+
+        # v2.21(#22): 后侧点出界时改成场内可达的踢球方向(见 _safe_kick_direction)。
+        kick_direction = self._safe_kick_direction(kick_direction)
 
         if self._backend is None:
             _log.debug(
@@ -801,12 +838,18 @@ class Player:
                 ball.x > half_l - 1.0
                 and abs(ball.y) <= goal_half + GOAL_LINE_SHOT_Y_MARGIN_M
             ):
-                if self.pose.x <= ball.x - 0.2:
+                # v2.21(#23): 旧条件是「pose.x<=ball.x-0.2 才走位、否则射门」,
+                # 而走位目标 ball.x-0.45 恰好落在该区间内 → robot3 到位后每帧
+                # 重复走位、永远不满足射门条件,在球后 0.47m 站 21s 吃
+                # inactiveRobot(第 15 场 230b0f05)。改为按实际距球判定:
+                # 距球 >0.55m 才继续靠近(目标 ball.x-0.35),到位即射。
+                d_ball = dist(self.pose.x, self.pose.y, ball.x, ball.y)
+                if d_ball > 0.55:
                     self.release_kick()
                     self.action = "attack:goal_line_approach"
                     self.walk_to(
                         (
-                            ball.x - 0.45,
+                            ball.x - 0.35,
                             clamp(ball.y, -half_w + 0.3, half_w - 0.3),
                         ),
                         face=angle_to(self.pose.x, self.pose.y, ball.x, ball.y),

@@ -306,6 +306,11 @@ KEEPER_CLEAR_STALL_M = 0.2
 # v2.18(analyst P0-2 补全): 只对慢球解围(球速>=0.6m/s 说明射门/快传,门将应先站位);
 # 球在身后(ball.x<pose.x)不 kick,避免绕到球后把门线让空。
 KEEPER_CLEAR_MAX_BALL_SPEED_MPS = 0.6
+# v2.21(analyst 第15场 #22): 后端 kick 任务会先绕到「球后侧点」(ball-0.45·dir)再推球;
+# 球贴边线/门线时该点落在场外,后端绕不过去→反复起停(第15场3个失球同根)。
+# kick 前校验后侧点是否在场内(留 0.15m 余量),出界则按角度步进旋向场内候选方向。
+KICK_BEHIND_OFFSET_M = 0.45
+KICK_BEHIND_MARGIN_M = 0.15
 
 # v2.2:对方定位球摆球期间的撤离节奏。
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
