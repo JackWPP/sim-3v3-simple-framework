@@ -96,6 +96,7 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
 | 11-24 | FREE_BATTLE | 啊对对队（未定级，1194，0胜0平2负） | **0:3 负** | 1（R-06 defender_set_play_interference robot1@sim232.3，+对方 retake） | **v2.24**（ver29，sha 880481d0…）：失球 sim54.4/153.3/535.4、对方 1 球被吹 own_free_kick；retake unconfirmed_set_play_ball_out@228.3；min_pair 12.3%、ball 半场 51.8%；rating 1114→1100（−14）；v2.24 首战未达预期 → 回滚 v2.23b |
 | 11-24 | FREE_BATTLE | 大魔王（未定级，1260，1胜2平5负） | **0:5 负** | 1（fallenRobot robot3@509.0，对方 5 罚） | **v2.23b**（ver30，sha f731f048…）：失球 sim78.5/148.7/274.1/605.8/678.6；对方 5 次定位球犯规送 5 retake 未转化；min_pair 15.8%、ball 半场 72.8%；rating 1100→1088（−12）；v2.23b 基线场 1/3 |
 | 11-24 | FREE_BATTLE | 11_8342（白银，1237，4胜0平5负） | **0:1 负** | 1（R-06 robot1@sim480.9，对方 5 罚/retake 7） | **v2.23b**（ver30）：失球 sim701.7、对方 1 球被吹 indirect；ball 半场 **89.9%**、oob caused 29；rating 1088→1076（−12）；v2.23b 基线场 2/3；R-06 复发→v2.25 修 #22 方向校验 |
+| 11-24 | FREE_BATTLE | 马里奥冲压（1266） | **0:1 负** | 5（3×R-06 robot2 + fallenRobot + R-07） | **v2.23b**（ver30）：失球 sim759.7、对方 2 球被吹 indirect；retake 10；ball 半场 75.1%；rating 1076→1066（−10）；基线场 3/3；v2.25 修 #22 贴线外踢 + 贴线球退场 |
 
 ## 7. v2.0 首战复盘（3:3 平，8f6e8d4e… 之外的新 match b8969e01）
 
