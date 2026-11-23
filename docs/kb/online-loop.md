@@ -151,3 +151,12 @@ node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' | sed 's/^"//
   - `guard()`：球在己方半场时按 ball.y **全量跟随**（gain 1.0、limit ±1.15），球更深时门将贴门线（inset 0.05m）。
 - 下一轮验证：用 v2.5 打 2~3 场（尤其 rating 1300+ 对手），重点看失球数/门将稳定性；若稳定则可继续上调进攻投入（v2.6：双人前插 + 定位球二次触球后的补射）。
 | 11-23 | FREE_BATTLE | 你美式吧（青铜，1041，8 场） | **3:0 胜** | 1（stopped_motion 0.335m/2.37s@sim119.0） | **v2.14**（ver19，sha 8631fe18…）：我方进球 sim150.93/284.01/556.84；对方 21 张 illegalPosition（12 outside_own_half + 9 kickoff_kicking_side_outside_center，成批 30s）；对方 1 球被判 goal_disallowed_own_free_kick；retake 0；协同 min_pair<1m 2.9%、two<1.5m 1.4%、avg_pair 5.26、avg_nearest 3.83、ball_in_home_half **14.8%**；oob awarded 3/caused 2；66 段 sha 66/66、5837 帧；评分 1138→1158（+20），对方 1041→999 |
+
+## 12. 线上有效局 10/10 里程碑（2026-11-23 22:13）
+
+- 有效 10 场 = #1(v2.5)、#2(v2.6)、#7(v2.11)、#8(v2.12)、#9(v2.13)、#11(v2.15)、#12(v2.16)、#13(v2.16)、#14(v2.17)、#15(v2.17)；**4 胜 2 平 4 负**。
+- 全部 15 场（150 credits）：无效 3 场（NameError 全员冻结 #3/#4/#5）、半有效 1（#6）、数据失真无效 1（#10 对方 21 罚）。
+- 最大收获：①`src/main.py` presser 裸 `ball` 与 `_act_opp_kickoff` 缺 `store` 两处 NameError → 全队冻结，靠离线回放自检 `tools/replay_playcheck.py` + 静态门禁 `tools/static_check.py` 定位并固化为提交前必跑门禁；②时间口径：`timing.primaryTime` 是 timeRemaining，sim 时间用 `event.simTime`；③数据有效性过滤：对方 0 人期>60s 或对方罚单≥10 才判无效，避免把「对方自身失误多」误判成数据失真。
+- 有效期内罚单趋势：3→0→0→2→2→0→1→3→0→1；stopped_motion 自 v2.13 后未再出现；R-06/R-07/M-02 全零已连续多场（#11 起）。
+- 最终线上默认代码：v2.20（ver24，sha256 9a4e6287…，851576B），含 v2.18 三项 + analyst 第 14 场两条（门将预测跨半场、定位球第一脚限距 5m/力度 3.4）。
+- 下一阶段：继续用 v2.20 跑对局，重点防守（对方长射、门将预测）与定位球合规；单场失球≤2 为验收线。
