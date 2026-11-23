@@ -371,6 +371,8 @@ def _set_play_kick_plan(
         # 没有合格队友时退化为横向轻推。
         half_w = context.field.width / 2.0
         goal_line_limit = half_length - SET_PLAY_PASS_GOAL_LINE_GAP_M
+        # v2.23(regression 2c7ddf7):球门球豁免 v2.20 的 5m 限距/3.4 力度上限。
+        exempt_pass_limit = set_play is SetPlay.GOAL_KICK
         mate = None
         best = math.inf
         target = None
@@ -381,6 +383,10 @@ def _set_play_kick_plan(
                 continue
             d = dist(ball.x, ball.y, mate_state.pose.x, mate_state.pose.y)
             if d <= 0.8 or d >= best:
+                continue
+            # v2.20(analyst 第14场): 第一脚限距 5m——过远会被裁判视为「未完成
+            # 二次触球」的间接球场景(551s 界外球 10.2m 直送对方半场,进球被吹)。
+            if not exempt_pass_limit and d > SET_PLAY_PASS_MAX_DIST_M:
                 continue
             # v2.3:落点里收、避边线至少 1.2m,y 向中路拉,降低第一脚出界 retake。
             tx = clamp(mate_state.pose.x, -half_length + 1.2, half_length - 1.2)
@@ -416,7 +422,9 @@ def _set_play_kick_plan(
             power = clamp(
                 SET_PLAY_PASS_POWER_BASE + SET_PLAY_PASS_POWER_PER_M * pass_dist,
                 SET_PLAY_PASS_POWER_MIN,
-                SET_PLAY_PASS_POWER_MAX,
+                SET_PLAY_PASS_POWER_MAX_EXEMPT
+                if exempt_pass_limit
+                else SET_PLAY_PASS_POWER_MAX,
             )
         else:
             # v2.8:横向轻推只在球已过半场附近(ball.x > -2)时用。复盘

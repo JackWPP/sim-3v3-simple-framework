@@ -194,7 +194,14 @@ SET_PLAY_TAKER_KEEP_MARGIN_M = 0.6
 SET_PLAY_PASS_POWER_BASE = 3.0
 SET_PLAY_PASS_POWER_PER_M = 0.25
 SET_PLAY_PASS_POWER_MIN = 3.0
-SET_PLAY_PASS_POWER_MAX = 4.5
+# v2.20(analyst 第14场): 间接球第一脚限距 5m + 力度上限 3.4——
+# 551s 界外球 taker 磨 14.5s、第一脚 10.2m 抽到对方半场,第二触 9s 后才发生,
+# 裁判只记 1 触 → 进球被判 goal_disallowed_indirect。短传必须「近、软、快二次触球」。
+SET_PLAY_PASS_MAX_DIST_M = 5.0
+SET_PLAY_PASS_POWER_MAX = 3.4
+# v2.23(regression 2c7ddf7): 球门球/角球第一脚豁免 5m 限距与 3.4 力度上限——
+# 球门球需要把球送得更远(解围性质),限距反而让第一脚落在危险区。
+SET_PLAY_PASS_POWER_MAX_EXEMPT = 4.5
 # v2.7:间接球第一脚禁止「直接/折射进门被判无效」:落点距对方门线至少该值(m),
 # 且离「球→对方门中心」的射门线至少 SET_PLAY_PASS_OFFLINE_M(m);没有合格队友时
 # 改为朝中路的横向轻推,力度 <=3.5。
@@ -295,10 +302,18 @@ KEEPER_DEEP_INSET_M = 0.1      # 贴线时离门线距离
 # 跟随目标,而不是当前 ball.y(球横传/折射时门将 y 跟错方向)。
 KEEPER_PREDICT_MIN_SPEED_MPS = 0.4
 KEEPER_PREDICT_MIN_VX = -0.3      # 仅朝己方门滚动的球才预测过线点
-KEEPER_PREDICT_MAX_TIME_S = 3.0   # 预测时域上限
+KEEPER_PREDICT_MAX_TIME_S = 2.0   # 预测时域上限(v2.20: 3.0→2.0, 跨半场长射 t_cross≤2.0)
 # 出击解围后 0.8s 内球位移 <0.2m → 判定 kick 卡死,release_kick 回门线。
 KEEPER_CLEAR_TIMEOUT_S = 0.8
 KEEPER_CLEAR_STALL_M = 0.2
+# v2.18(analyst P0-2 补全): 只对慢球解围(球速>=0.6m/s 说明射门/快传,门将应先站位);
+# 球在身后(ball.x<pose.x)不 kick,避免绕到球后把门线让空。
+KEEPER_CLEAR_MAX_BALL_SPEED_MPS = 0.6
+# v2.21(analyst 第15场 #22): 后端 kick 任务会先绕到「球后侧点」(ball-0.45·dir)再推球;
+# 球贴边线/门线时该点落在场外,后端绕不过去→反复起停(第15场3个失球同根)。
+# kick 前校验后侧点是否在场内(留 0.15m 余量),出界则按角度步进旋向场内候选方向。
+KICK_BEHIND_OFFSET_M = 0.45
+KICK_BEHIND_MARGIN_M = 0.15
 
 # v2.2:对方定位球摆球期间的撤离节奏。
 # 裁判 MUST_STOP_GRACE_MS=1500 内移动不罚,宽限后 2s 窗口位移 >0.3m 才罚 M-02。
