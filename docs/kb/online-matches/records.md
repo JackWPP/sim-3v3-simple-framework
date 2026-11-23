@@ -25,7 +25,7 @@
 | 11 | 2026-11-23 20:52 | v2.15 (ver21) | Micky-Rex | 1078 | **4:5 负** | 0 | 0 | 进球（simTime，按事件 simTime 字段）：我方 41.9/136.5/261.8/367.4；对方 85.0/309.1/403.2/589.4/**643.7（终场前约 14s 绝杀）**。节奏：1:0 → 1:1 → 2:1 → 3:1 → 3:2 → 4:2 → 4:3 → 4:4 → 4:5；**4:2 领先到 367s 后连丢 3 球被逆转**（原记录误用 timeRemaining 顺序，已纠正）。retake 0、disallowed 0；协同 avg_pair 4.34m、min_pair<1m 10.0%、two<1.5m_ball 5.7%、avg_nearest 3.02m、ball_in_home_half 48.8%；oob 我方 awarded 3/caused 7、对方 7/3；66 段 sha 66/66、5678 帧、657.2s；rating 1158→1128（-30）、对方 1078→1159（+81）；**clean 场（双方 0 罚，无数据有效性过滤），但输弱队** → 防守转入下一轮重点 | v2.16（按 Lead m02289/m02385）：①定位球防守圆弧半径 2.6→3.1m（避开 M-05 3m 圈）+ 到位后 ±0.2rad/2.5s 微摆；弦线下界 d_ball<2.4 先径向拉到 3.1m 再切向；radial_escape 被边线 clamp 变近时改切向撤离。②门线补射取消 pose.x>ball.x-0.2 限制（从场内跑向门线球先绕到球后 0.45m 再射）；球在角旗区（|ball.y|>goal_half+0.6）仍走 line_clear。③M-02 双段撤离：检测后 0.35s 按 0.3m/s 径向冲出，再降 0.10m/s 慢爬。④失球后 3s 内非门将 support 后撤深度限制 x≥-2.0（防连续失球）；门将解围后不追球（球出解围半径即结束 kick 回门线）。 | docs/kb/reviews/ca573600-63ea-412e-b3c8-643e34c86a38.md（analyst 进行中） | **有效**（clean 场；v2.15 纪律验收：0 罚单） |
 | 12 | 2026-11-23 21:13 | v2.16 (ver22) | GEN.G_Sendi | 1155 | **3:0 胜** | 1（fallenRobot robot2@sim604.9，height 0.19m/fellDuration 10.014s，位于对方半场 (5.93,0.77)，终场前 74s，无战术影响） | 0 | 我方进球 simTime 123.5/290.1/399.5；对方 0 球（**单场失球 0，防守验收达成**）；协同 home avg_pair 6.28m、min_pair<1m 5.3%、avg_nearest 2.98m、ball_in_home_half 12.0%；oob 我方 awarded 6/caused 12、对方 12/6；68 段 sha256 68/68、5878 帧、678.7s；rating 1128→1155（+27），对方 1155→1116（-39）；counted=true | v2.16（六项静态修法：orbit 3.1m+微摆/先径向拉出/门线补射去 pose 限制/角旗过滤/切向撤离/双段撤离；+失球后 3s 防守线、门将解围后不追球） | 待 analyst 复盘 | **有效（clean 场：对方 0 罚，无 0 人期）** |
 | 13 | 2026-11-23 21:27 | v2.16 (ver22) | 句号 | 1166 | **3:1 胜** | 3（全 fallenRobot：robot3@sim467.6、robot2@sim488.3、robot2@sim617.3，均倒地 >10s；本场两队合计 7 次倒地，疑高对抗碰撞/门柱区） | 7（4×fallenRobot、2×defender_set_play_interference、1×illegalPosition @sim690.6 absX 7.25/absY 4.57；**无对方 0 人期**） | 我方进球 sim 106.5/240.4/645.5；对方 490.4；retake 4；协同 home avg_pair 5.52m、min_pair<1m 6.6%、two<1.5m 5.4%、avg_nearest 4.17m、ball_in_home_half 16.8%；oob 我方 awarded 12/caused 8、对方 8/12；6340 帧、716.4s、sha 68/68；rating 1155→1179（+24），对方 1166→1106（-60）；counted=true。**有效性：有效（Lead 裁定；对方 7 罚但无 0 人期、双方均有罚单、节奏正常）** | 沿用 v2.16；随后 v2.17 门将/presser 修复 | 待 analyst 复盘 | **有效（Lead m02646 裁定：counted=true；对方 7 罚无 0 人期，按新规则记有效）** |
-| 14 | 2026-11-23 21:42 | v2.17 (ver23) | 11_8342 | 1237 | 1:1 平 | 0 | 4（全 Fallen robot：robot5@sim44.5、robot6@79.2、robot4@273.4、robot6@714.1，upDot≈0/height≤0.11；对方 0 人期=0） | 我方进球 sim212.58s、失球 sim703.46s、我方 1 球被判 goal_disallowed_indirect（sim579.79）；retake 0；home avg_pair 4.79m、min_pair<1m 15.1%、two<1.5m 7.4%、avg_nearest 2.86m、ball_in_home_half 57.9%；oob 13/19、对方 19/13；73 段 sha 73/73、6367 帧、722.32s；rating 1179→1182（+3），对方 1237→1229（-8）；counted=true | v2.17 首战（门将过线点预测/clear 0.85+0.8s 自恢复/presser 1.6m·粘滞）；防守验收：单场失球 1≤2 ✅、我方 0 罚单 | 待 analyst 复盘 | **待裁定（建议有效：对方 4 罚、无 0 人期，数据未失真）** |
+| 14 | 2026-11-23 21:42 | v2.17 (ver23) | 11_8342 | 1237 | 1:1 平 | 0 | 4（全 Fallen robot：robot5@sim44.5、robot6@79.2、robot4@273.4、robot6@714.1，upDot≈0/height≤0.11；对方 0 人期=0） | 我方进球 sim212.58s、失球 sim703.46s、我方 1 球被判 goal_disallowed_indirect（sim579.79）；retake 0；home avg_pair 4.79m、min_pair<1m 15.1%、two<1.5m 7.4%、avg_nearest 2.86m、ball_in_home_half 57.9%；oob 13/19、对方 19/13；73 段 sha 73/73、6367 帧、722.32s；rating 1179→1182（+3），对方 1237→1229（-8）；counted=true | v2.17 首战（门将过线点预测/clear 0.85+0.8s 自恢复/presser 1.6m·粘滞）；防守验收：单场失球 1≤2 ✅、我方 0 罚单 | 待 analyst 复盘 | **有效（Lead m02773 裁定：counted=true、无 0 人期、数据未失真）** |
 
 ## 提交门禁（v2.11 起，每次 build/submit 前必跑）
 
@@ -53,7 +53,8 @@ v2.7 `_act_normal` presser 分支裸 `ball`），两次都被 framework `runtime
 判定依据来自 match detail 的 `home_fouls/away_fouls`、事件流罚单与 replay 逐帧机器人计数；
 写 records 时在「有效」列注明无效原因。第 10 场（0116ec1d，对方 21 罚、约 245s 0 人）为首例。
 
-**v2.17 修订（Lead m02646）**：过滤本意是剔除「对方异常导致数据失真」。规则改为
-**「对方罚单 >3 且（对方 0 人期 >60s 或 对方罚单 > 我方罚单 ×3）→ 无效」**，其余按有效记。
-第 13 场（7b6d6a4d，对方 7 罚无 0 人期、双方均有罚单、比分 3:1）据此记**有效**。
+**v2.18 修订（Lead m02773，最终版）**：过滤本意是剔除「对方异常导致数据失真」。无效判定改为
+**「对方 0 人期 >60s 或 对方罚单 ≥10」**；单纯「对方罚单 >3」不再判无效。
+据此：第 13 场（7b6d6a4d，对方 7 罚）**有效**、第 14 场（0dba8c4e，对方 4 罚）**有效**；
+第 10 场（0116ec1d，对方 21 罚 + 约 245s 0 人）仍为**无效**。
 
