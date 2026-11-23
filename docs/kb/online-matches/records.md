@@ -43,6 +43,7 @@
 | 29 | 2026-11-24 03:51 | v2.26 (ver32) | 11_8342 | 1281 | **0:2 负** | 0 | 0 | 失球 sim69.0/694.6，对方另 1 球被判 goal_disallowed_indirect（sim133.3）；双方 0 罚；retake 2（均对方 unconfirmed_set_play_ball_out）；home avg_pair 4.22m、min_pair<1m 16.2%、two<1.5m 8.9%、avg_nearest 2.29m、ball_in_home_half **74.8%**；oob awarded 24/caused 24；77 段 sha 77/77、6609 帧、767.9s；rating 1044→1036（−8），对方 1281→1296（+15）；counted=true | v2.26 小样本 3/3 完成：1:4 / 2:3 / 0:2 全负，但 3 场 **0 罚、0 R-06、0 R-07**、retake 0/0/2、进球 3；Lead 判「v2.26 基线保留 + 打补丁 v2.27」 | 待 analyst | **有效** |
 | 30 | 2026-11-24 04:06 | v2.27 (ver33) | 句号 | 1153 | **0:2 负** | 3 | 3 | 失球 sim231.8/666.0；我方 3 罚：fallenRobot robot1@sim244.7、R-06 defender_set_play_interference robot1@sim423.7（+对方 retake）、fallenRobot robot2@sim568.2；对方 3 罚（2 fallenRobot + 1 illegalPosition）；retake 1；home avg_pair 4.42m、min_pair<1m **25.1%**、two<1.5m **25.0%**（近 4 场最差挤球）、avg_nearest 2.39m、ball_in_home_half **64.6%**；oob awarded 16/caused 12；72 段 sha 72/72、6363 帧、717.3s；rating 1036→1023（−13），对方 1153→1185（+32）；counted=true | v2.27 小样本 1/3：support 射线清空后挤球反而恶化（min_pair 25.1%/two 25.0%）、0 进球、R-06 复发；若第 2 场同样 0 胜/进球≤1/ball>70% → 按 Lead 停第 3 场转 v3.0 | 待 analyst | **有效** |
 | 31 | 2026-11-24 04:21 | v2.27 (ver33) | 123213 | 1213 | **1:3 负** | 0 | 1 | 我方进球 sim3.1、失球 sim54.8/238.6/556.0；对方 2 球被判 goal_disallowed_indirect（269.7/291.8）；双方 0/1 罚；retake 0；home avg_pair 4.08m、min_pair<1m 10.0%、two<1.5m 5.3%、avg_nearest 2.02m、ball_in_home_half **82.6%**；oob awarded 15/caused 5；69 段 sha 69/69、6023 帧、686.5s；rating 1023→1013（−10），对方 1213→1242（+29）；counted=true | **v2.27 = rejected**（Lead m03543）：解围射线清空导致前场挤球（第30场 min_pair 25.1% 近4场最差）+ 0 进球 + 3 罚 + R-06 复发 + ball 半场 64.6/82.6%；保留 commit b7709ba 作对照，不再跑第 3 场 | 待 analyst | **有效** |
+| 32 | 2026-11-24 04:44 | v3.0 (ver34) | 句号 | 1185 | **1:1 平** | 0 | 1 | 我方进球 sim125.31、失球 sim381.03；对方 1 罚 fallenRobot robot6@sim492.42；retake 0；home avg_pair 4.52m、min_pair<1m 13.8%、two<1.5m 7.3%、avg_nearest 2.31m、ball_in_home_half **58.5%**；oob awarded 17/caused 13；73 段 sha 73/73、6274 帧、722.7s；rating 1013→1021（+8），对方 1185→1166（−19）；counted=true | v3.0 A/B 1/3：restore v2.16 基线 + 2 patches（#22 夹取/门口容差带）。验收：ball 半场 58.5%<60 ✓、失球 1≤2 ✓、进球 1 ✓、罚单 0≤1 ✓、R-06=0 ✓ → 单场通过 | 待 analyst | **有效** |
 
 
 ## 有效局里程碑：10/10 达成（2026-11-23 22:13）
@@ -97,3 +98,12 @@ v2.7 `_act_normal` presser 分支裸 `ball`），两次都被 framework `runtime
 据此：第 13 场（7b6d6a4d，对方 7 罚）**有效**、第 14 场（0dba8c4e，对方 4 罚）**有效**；
 第 10 场（0116ec1d，对方 21 罚 + 约 245s 0 人）仍为**无效**。
 
+## v2.27 rejected 与 v3.0 A/B 小节（2026-11-24）
+
+- **v2.27 = rejected**（Lead m03543）：support 解围射线清空（ball.x+2.8/±2.2）导致前场三台更挤（#30 min_pair 25.1%/two 25.0% 近 4 场最差）、0 进球、R-06 复发；两场 0:2/1:3、0 胜、进球 1；第 3 场不跑，保留 commit b7709ba 作对照。
+- **v3.0**（version 34）= v2.16@535766a 源码原样 + 2 patches：①#22 越界分量夹取（KICK_BEHIND_OFFSET_M 0.45/MARGIN 0.02，失败回退旧旋转搜索）②门口容差带（|x|≥6.88 且 |y|≤1.6 门将放宽解围、robot |x|≤7.12 己方门线回收、chase 目标同侧 clamp）。门禁 35/35 PASS。
+- **v3.0 A/B 验收线**：ball 半场<60%、失球≤2、进球≥1/场、罚单≤1/场、0 R-06；3 场后与 v2.26/v2.27 做版本小结。
+
+| A/B# | 场次 | 时间 | 版本 | 对手(赛前评级) | 比分 | 我方罚单 | min_pair / 球半场 | 结论 |
+|---|---|---|---|---|---|---|---|---|
+| 1/3 | #32 fde87d29 | 04:44 | v3.0 ver34 | 句号(1185) | 1:1 平 | 0 | 13.8% / 58.5% | 全项达标；rating 1013→1021（+8） |
