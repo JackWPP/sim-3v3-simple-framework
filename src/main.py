@@ -135,6 +135,14 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         # v4.4a:对方重启二点前压的状态(球静置计时/最后球位)。
         store.opp_restart_ball = None
         store.opp_restart_static_since = None
+        # v5.0 Step2(Lever C):丢球反抢状态(触球方/丢球时刻/夺回窗口)。
+        store.last_touch_side = None
+        store.last_touch_t = None
+        store.loss_t = None
+        store.loss_pos = None
+        store.press_until = None
+        store.recover_until = 0.0
+        store.touch_prev_speed = None
 
     @staticmethod
     def play(context: Context, players: list[Player], store) -> None:
@@ -149,6 +157,8 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         ball_now = context.ball
         if ball_now is not None:
             store.last_ball_pose = (ball_now.x, ball_now.y)
+        # v5.0 Step2(Lever C):触球/丢球事件检测(球速跃升 + last_touch_side)。
+        _update_touch_events(context, players, store)
 
         # 当前 phase 以 label 画在场外。
         from .framework import debugdraw
@@ -532,6 +542,44 @@ def _slow_patrol(
     )
 
 
+def _update_touch_events(context: Context, players: list[Player], store) -> None:
+    """v5.0 Step2(Lever C, v5-spec §4.1):用球速跃升检测触球方,记录丢球/夺回。
+
+    球速单帧跃升 > PRESS_TOUCH_DETECT_DV 视为一次触球:最近己方球员 <=0.75m
+    记 home,否则记 away。home→away 记丢球(loss_t/press_until),away→home
+    记夺回(recover_until,1s 内第一脚禁用 slowball 慢速倒脚)。
+    """
+    ball = context.ball
+    if ball is None:
+        return
+    vel = _ball_velocity_mps(context, store)
+    if vel is None:
+        return
+    speed = math.hypot(vel[0], vel[1])
+    prev_speed = getattr(store, "touch_prev_speed", None)
+    store.touch_prev_speed = speed
+    if prev_speed is None or speed - prev_speed < PRESS_TOUCH_DETECT_DV:
+        return
+    nearest_home: Player | None = None
+    best_d = math.inf
+    for p in players:
+        if p.pose is None:
+            continue
+        d = dist(p.pose.x, p.pose.y, ball.x, ball.y)
+        if d < best_d:
+            best_d, nearest_home = d, p
+    prev_side = getattr(store, "last_touch_side", None)
+    side = "home" if (nearest_home is not None and best_d <= PRESS_TOUCH_NEAR_M) else "away"
+    if side == "away" and prev_side == "home":
+        store.loss_t = context.now
+        store.loss_pos = (ball.x, ball.y)
+        store.press_until = context.now + PRESS_ON_LOSS_WINDOW_S
+    elif side == "home" and prev_side == "away":
+        store.recover_until = context.now + RECOVER_WINDOW_S
+    store.last_touch_side = side
+    store.last_touch_t = context.now
+
+
 def _act_normal(context: Context, players: list[Player], store) -> None:
     """NORMAL:距球最近者 attack,剩下人里离己方门最近者 guard,其余 support。
 
@@ -710,6 +758,94 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     game = context.game
     speed = math.hypot(ball_vel[0], ball_vel[1]) if ball_vel is not None else None
 
+    # v5.0 Step2(Lever C, v5-spec §4):丢球即反抢。丢球事件在 play() 里检测
+    # (球速跃升 + last_touch_side 从 home 变 away);2.5s 窗口内、球不在对方
+    # 三区时指派 P1(最近)/P2(次近)/P3(球在己方半场时第三人):P1 omni 直冲、
+    # 接触即朝我方半场边线解围(不绕球后方);P2 封内线;P3 占门线侧。
+    # 上限 2s 后自动回 support,防被反击/防 inactiveRobot。
+    loss_t = getattr(store, "loss_t", None)
+    press_window = (
+        bool(field_players)
+        and loss_t is not None
+        and context.now - loss_t <= PRESS_DURATION_S
+        and ball.x <= PRESS_MAX_LOSS_BALL_X
+        and game is not None
+        and game.state == GameState.PLAYING
+        and not game.stopped
+        and (game.set_play is None or game.set_play == SetPlay.NONE)
+        and out_retreater is None
+    )
+    if press_window:
+        half_l_p = context.field.length / 2.0
+        half_w_p = context.field.width / 2.0
+        gx_p, gy_p = own_goal(context)
+        ux_p, uy_p = gx_p - ball.x, gy_p - ball.y
+        un_p = math.hypot(ux_p, uy_p)
+        if un_p < 1e-6:
+            ux_p, uy_p, un_p = -1.0, 0.0, 1.0
+        ux_p, uy_p = ux_p / un_p, uy_p / un_p
+        ranked = sorted(
+            field_players,
+            key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
+        )
+        press_p1 = ranked[0]
+        press_p2 = ranked[1] if len(ranked) > 1 else None
+        press_p3 = (
+            ranked[2]
+            if len(ranked) > 2 and ball.x <= PRESS_LANE_MAX_BALL_X
+            else None
+        )
+        d1 = dist(press_p1.pose.x, press_p1.pose.y, ball.x, ball.y)
+        if d1 <= PRESS_FIRST_CONTACT_M:
+            side_p = 1.0 if ball.y >= 0.0 else -1.0
+            press_p1.action = "press:clear"
+            press_p1.kick(
+                angle_to(
+                    ball.x, ball.y,
+                    clamp(ball.x - 1.5, -half_l_p + 0.3, half_l_p - 0.3),
+                    side_p * (half_w_p - 0.8),
+                ),
+                PRESS_FIRST_POWER,
+            )
+        else:
+            press_p1.release_kick()
+            press_p1.action = "press:first"
+            press_p1.omni_move_toward(
+                _field_point(context, ball.x, ball.y, 0.4),
+                speed=PRESS_FIRST_SPEED,
+            )
+        if press_p2 is not None:
+            press_p2.release_kick()
+            press_p2.action = "press:block"
+            press_p2.omni_move_toward(
+                _field_point(
+                    context,
+                    ball.x + ux_p * PRESS_BLOCK_D,
+                    ball.y + uy_p * PRESS_BLOCK_D,
+                    0.3,
+                ),
+                speed=PRESS_BLOCK_SPEED,
+            )
+        if press_p3 is not None:
+            press_p3.release_kick()
+            press_p3.action = "press:lane"
+            press_p3.omni_move_toward(
+                _field_point(
+                    context,
+                    clamp(
+                        ball.x + ux_p * PRESS_LANE_D,
+                        -half_l_p + 2.5,
+                        half_l_p,
+                    ),
+                    ball.y + uy_p * PRESS_LANE_D,
+                    0.3,
+                ),
+                speed=PRESS_LANE_SPEED,
+            )
+        for q_p in (press_p1, press_p2, press_p3):
+            if q_p is not None:
+                field_players = [z for z in field_players if z is not q_p]
+
     # v3.3(Lead m03914 + analyst 防守崩盘):己方三区慢球「强制接触+定向解围」。
     # 证据:#40 C1/C2、#41 C1/C2/C3 共 5 球;23 段 static 中 22 段 >=2s 未触,
     # 最近者 0.44-1.06m 却触不到(绕位/夹取死锁),被对方 2.5-3.3m/s 慢球打穿。
@@ -722,6 +858,7 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         ball.x < OWN_THIRD_SLOW_BALL_X
         and speed is not None
         and speed < SLOW_BALL_SPEED_MPS
+        and context.now >= getattr(store, "recover_until", 0.0)
         and game is not None
         and game.state == GameState.PLAYING
         and not game.stopped

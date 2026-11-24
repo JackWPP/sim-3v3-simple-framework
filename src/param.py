@@ -505,6 +505,27 @@ FRONT_Z2B_LANE_CLEAR_M = 1.5      # Z2b pass 线路被对手封堵的判定距�
 FRONT_KICK_STALL_S = 1.5          # 前场踢球任务 1.5s 未执行视为卡住
 FRONT_KICK_STALL_M = 0.3          # 球位移 <0.3m 视为未执行
 
+# ---------------------------------------------------------------------------
+# v5.0 Step2(Lever C, v5-spec §4):丢球即反抢。丢球事件=球速跃升且
+# last_touch_side 从 home 变 away;2.5s 窗口内、球不在对方三区时 P1/P2/P3
+# 就地反抢(P1 不绕球后方),夺回 1s 内第一脚禁止 slowball 慢速倒脚。
+# ---------------------------------------------------------------------------
+PRESS_TOUCH_DETECT_DV = 1.5       # 球速跃升阈值(m/s)判一次触球
+PRESS_TOUCH_NEAR_M = 0.75         # 我方最近球员 <=该距离视为我方触球
+PRESS_ON_LOSS_WINDOW_S = 2.5      # 丢球反抢总窗口
+PRESS_MAX_LOSS_BALL_X = 2.0       # 球在对方三区(>该 x)不启动反抢
+PRESS_FIRST_SPEED = 1.8           # P1 第一扑 omni 速度
+PRESS_FIRST_CONTACT_M = 0.55      # P1 接触判据
+PRESS_FIRST_POWER = 5.0           # P1 解围力度(朝我方半场边线)
+PRESS_BLOCK_D = 1.2               # P2 封内线站位(球→己门方向)
+PRESS_BLOCK_SPEED = 1.8           # P2 速度
+PRESS_LANE_D = 2.5                # P3 门线侧站位
+PRESS_LANE_SPEED = 1.6            # P3 速度
+PRESS_LANE_MAX_BALL_X = 0.0       # 仅球在己方半场才启用 P3
+PRESS_DURATION_S = 2.0            # P1 反抢最长时长(之后回 support)
+RECOVER_FIRST_TOUCH_POWER = 5.5   # 夺回后第一脚最低力度(防慢速倒脚)
+RECOVER_WINDOW_S = 1.0            # 夺回后第一脚窗口
+
 
 # v4.2(P2, playbook §P2): 禁区第二人。attacker 在对方禁区前沿(ball.x >
 # half_l - 2.5)时,非门将第二人前插到 ball+2.5m(向门)+横向 1.2m 抢二点/

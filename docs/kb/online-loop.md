@@ -273,3 +273,12 @@ v3.0 = restore v2.16(535766a) + 2 patches（#22 越界分量夹取 + 门口容�
 - 离线候选包：`build/com.example.lqinternalmatch-1.1.0.agent` sha256 `46cee9a2b72deb83d1b9108a1cb1823eed5ac4c6b0b3f0fe3f3d87851aedb0b8`、862871B
 - 回放复演（只统计 `_coordinated_kick_plan` 返回动作，#93/#94/#64）：front_push 287/191/64、front_shoot 10/25/12、front_touchline_push 2/77/0、front_pass 0（Z2b 未触发：需 ball>12m 且 x>0，正常）
 - 下一步：Step2 = Lever C 反抢（spec §4）；Step3 = Lever B box 终结（spec §3）
+
+### 13.2 Step2 = Lever C 丢球即反抢
+- 事件检测（`main.py::_update_touch_events`，play() 内每帧）：球速单帧跃升 >1.5m/s 记一次触球；最近己方球员 ≤0.75m 记 home，否则 away；home→away 记丢球（`loss_t`/`press_until`），away→home 记夺回（`recover_until`，1s 内第一脚禁用 slowball 慢速倒脚）
+- 反抢指派（`_act_normal`，仅在 NORMAL/球 x≤2.0/丢球 2s 内/无出界撤位时）：P1 最近者 omni 1.8 直冲、接触 0.55m 即朝我方半场边线解围 power 5.0（不绕球后方）；P2 次近者站 ball+1.2·unit(己门) 封内线 1.8m/s；P3（球在己方半场 x≤0 才启用）站 ball+2.5·unit(己门) 1.6m/s；2s 后自动回 support
+- 新增参数（param “v5.0 Step2” 段）：PRESS_TOUCH_DETECT_DV=1.5、PRESS_TOUCH_NEAR_M=0.75、PRESS_ON_LOSS_WINDOW_S=2.5、PRESS_MAX_LOSS_BALL_X=2.0、PRESS_FIRST_SPEED=1.8、PRESS_FIRST_CONTACT_M=0.55、PRESS_FIRST_POWER=5.0、PRESS_BLOCK_D=1.2、PRESS_BLOCK_SPEED=1.8、PRESS_LANE_D=2.5、PRESS_LANE_SPEED=1.6、PRESS_LANE_MAX_BALL_X=0.0、PRESS_DURATION_S=2.0、RECOVER_FIRST_TOUCH_POWER=5.5、RECOVER_WINDOW_S=1.0
+- 门禁：py_compile / check_names / static_check 全绿；replay_playcheck 最近 30 场 **PASS、0 异常**（/tmp/playcheck_v5step2.json）
+- 离线候选包：sha256 `7adf3fe25c52711a4e851b054dde65cb13b017a9785261097c72969e9475b253`、864774B
+- 回放复演确认反抢分支生效：#94 0ab411d9 press:first 55/press:block 61/press:clear 6 帧；#74 fdef4682 95/104/9；#93 0ab411d9 压制对手场次为 0（无丢球事件）
+- 下一步：Step3 = Lever B box 终结（spec §3）
