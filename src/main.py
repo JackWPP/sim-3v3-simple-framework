@@ -628,6 +628,45 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     # 在开放球权 + 球几乎静止 + 无人贴近时,强制最近的非门将做 presser。
     game = context.game
     speed = math.hypot(ball_vel[0], ball_vel[1]) if ball_vel is not None else None
+
+    # v3.3(Lead m03914 + analyst 防守崩盘):己方三区慢球「强制接触+定向解围」。
+    # 证据:#40 C1/C2、#41 C1/C2/C3 共 5 球;23 段 static 中 22 段 >=2s 未触,
+    # 最近者 0.44-1.06m 却触不到(绕位/夹取死锁),被对方 2.5-3.3m/s 慢球打穿。
+    # 触发:ball.x<OWN_THIRD_SLOW_BALL_X、球速<SLOW_BALL_SPEED_MPS、最近非门将
+    # 距球<=SLOW_BALL_NEAR_DIST_M、该状态持续>=SLOW_BALL_DURATION_S。行为:最近
+    # 非门将用 omni 直冲球至 <=SLOW_BALL_CLEAR_CONTACT_M,再朝边线(|y| 增大)
+    # 定向解围;不绕球后方(避开 _behind_ball 夹取死锁);抢球者不当 keeper。
+    slow_since = getattr(store, "slow_ball_since", None)
+    slow_ctx = (
+        ball.x < OWN_THIRD_SLOW_BALL_X
+        and speed is not None
+        and speed < SLOW_BALL_SPEED_MPS
+        and game is not None
+        and game.state == GameState.PLAYING
+        and not game.stopped
+        and (game.set_play is None or game.set_play == SetPlay.NONE)
+        and out_retreater is None
+    )
+    if slow_ctx:
+        if slow_since is None:
+            slow_since = context.now
+            store.slow_ball_since = slow_since
+    else:
+        slow_since = None
+        store.slow_ball_since = None
+    slow_ball_presser: Player | None = None
+    if (
+        slow_ctx
+        and slow_since is not None
+        and field_players
+        and context.now - slow_since >= SLOW_BALL_DURATION_S
+    ):
+        near_sb = min(
+            field_players,
+            key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
+        )
+        if dist(near_sb.pose.x, near_sb.pose.y, ball.x, ball.y) <= SLOW_BALL_NEAR_DIST_M:
+            slow_ball_presser = near_sb
     forced_presser: Player | None = None
     if (
         field_players
@@ -643,7 +682,32 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         )
         if dist(near.pose.x, near.pose.y, ball.x, ball.y) > PRESSER_TRIGGER_DIST_M:
             forced_presser = near
-    if forced_presser is not None:
+    if slow_ball_presser is not None:
+        attacker = slow_ball_presser
+        store.normal_attacker = attacker.id
+        half_w_sb = context.field.width / 2.0
+        side_sb = 1.0 if ball.y >= 0.0 else -1.0
+        clear_target = (
+            ball.x + SLOW_BALL_CLEAR_AHEAD_M,
+            side_sb * (half_w_sb - 0.3),
+        )
+        d_sb = dist(attacker.pose.x, attacker.pose.y, ball.x, ball.y) if attacker.pose is not None else 0.0
+        if d_sb > SLOW_BALL_CLEAR_CONTACT_M:
+            attacker.action = "slowball:approach"
+            attacker.omni_move_toward(
+                _field_point(context, ball.x, ball.y, 0.3),
+                speed=SLOW_BALL_APPROACH_SPEED_MPS,
+            )
+        else:
+            attacker.action = "slowball:clear"
+            attacker.kick(
+                angle_to(ball.x, ball.y, clear_target[0], clear_target[1]),
+                KICK_POWER_CLEAR,
+            )
+        if attacker.pose is not None:
+            primary_pose = (attacker.pose.x, attacker.pose.y)
+        rest = [p for p in field_players if p is not attacker]
+    elif forced_presser is not None:
         attacker = forced_presser
         store.normal_attacker = attacker.id
         # v2.12(P0-a): 己方三区死球不再绕位,直接站到球的门侧再解围。第 7 场

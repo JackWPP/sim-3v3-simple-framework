@@ -344,6 +344,17 @@ PRESSER_STALL_SPEED_MPS = 0.2
 # 先恢复 v2.11 行为,P0-a 三区解围保留待复盘判读。
 PRESSER_TRIGGER_DIST_M = 1.2
 
+# v3.3(Lead m03914 + analyst defense-collapse):己方三区慢球「强制接触+定向解围」。
+# 证据:#40 C1/C2、#41 C1/C2/C3 共 5 球;23 段 static 中 22 段 ≥2s 未触,最近者
+# 0.44–1.06m 却够不到(绕位/夹取死锁),被对方 2.5–3.3m/s 慢球打穿。
+OWN_THIRD_SLOW_BALL_X = -2.0
+SLOW_BALL_SPEED_MPS = 0.8
+SLOW_BALL_NEAR_DIST_M = 2.5
+SLOW_BALL_DURATION_S = 1.5
+SLOW_BALL_CLEAR_CONTACT_M = 0.45
+SLOW_BALL_APPROACH_SPEED_MPS = 1.5
+SLOW_BALL_CLEAR_AHEAD_M = 0.5
+
 # v2.12: 己方三区直接解围(Lead/analyst:第7场两个失球同型——己方三区静止球,
 # 我方最近者绕位1.5s不触球,对手0.35m先捅)。x < 该值即视为己方三区。
 OWN_THIRD_CLEAR_BALL_X = -3.5
