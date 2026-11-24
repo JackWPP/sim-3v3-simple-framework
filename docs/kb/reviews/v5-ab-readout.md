@@ -87,6 +87,8 @@ PY
 
 ## 4. 三闸门决策规则（pre-registered，阈值按 §3.1 基线校准）
 
+> ITERATE 臂登记：**iter2 = 首选**（`v5.0-iter2-193145a9.agent`，sha `193145a9…`，候选已推送；shadow 全归档 92 场见 `v5-shadow-allsets.md`）；iter1 留档（+5% 不足）。A/B 触发 ITERATE 时的验证规模=**2 场同对手配对**，预算合计 **60 credits**（4 场主 A/B + 2 场 iter2）。
+
 **G1 纪律（硬门）**
 - PASS：A/B 组内策略性罚单（R-06/R-07/M-02/inactive）≤1 且可归因于对手/平台（例如对方快发/掉线冻结），且 fallen/stuck 不高于 v4.5b 近 10 场均值。
 - **ROLLBACK**：2 场内 ≥2 张策略性罚单；或 global_game_stuck ≥2 场；或 fallenRobot ≥3 次/场（M-04 被新角色诱发）。
@@ -94,6 +96,7 @@ PY
 **G2 产出（主判据，对照 §3.1 基线表：同对手子集优先）**
 - PASS：射正/场 ≥ max(2.5, 基线−25%) 且 goals/场 ≥ 基线−25%；shots/场 ≥ 基线−35%（允许因少盲射下降，但不能到「无威胁」）。
 - 若同对手历史上 v4.5b 都胜 ≥2 球，v5 应至少 1 胜 1 场进球 ≥2；否则视为产出回退信号。
+- 离线预判（shadow 全量 92 场，`docs/kb/reviews/v5-shadow-allsets.md`）：final2 射门决策帧 −61%（median 0.33×），**G2 的 shots 项有较大概率触发 ITERATE**；线上以射正/goals 为准（少射多推是否换到更好机会只能由 A/B 判定）。
 
 **G3 效率/地盘（辅助，防止「为改而改」）**
 - PASS：box touch ≥4/场（competitive 基线 3.9）、prog travel ≥1.5 m、oobCaused ≤同对手基线+10%（§3.1 校准，替代原「≤15」）、press recovery ≥60%。
@@ -103,8 +106,8 @@ PY
 | G1 | G2 | G3 | 判定 |
 |---|---|---|---|
 | PASS | PASS | PASS | **KEEP v5**，按 §7 继续下一轮 |
-| PASS | FAIL（射门/射正/goals 下降 >25%） | PASS 或改善 | **ITERATE（v5 内放宽 Z1）**：Z1 封堵线 1.2→0.9 m、cooldown 1.0→0.6 s；若 z3 贴线推 >30 次/场且 box touch 不升，Z3 |y| 门限 half_w−0.30→−0.45；重跑同配对 2 场 |
-| PASS | FAIL（下降 >50%） | FAIL | **ROLLBACK 回 v4.5b**（候选 sha `6fb30100` 系），记录原因 |
+| PASS | FAIL（射门/射正/goals 下降 >25%） | PASS 或改善 | **ITERATE（v5 内放宽 Z1 → 用 iter2，优先）**：iter2 已把 shadow 射门缺失从 −61% 收敛到 −48~56%、z3 误判修复，参数=①Z1 封线否决仅 `d_goal>4.5 m` 或最近阻挡者距球 <0.6 m 时生效；②Z3 收窄为 `|y|>half_w−0.15 且 x>half_l−1.0`；③cooldown 0.6 s。iter1（封线 1.2→0.9+cooldown 1.0→0.6）仅 +5% 已留档，不再作为 ITERATE 臂。验证：用 iter2 做 **2 场同对手配对**（与主 A/B 同对手/同槽位），按本表 G1/G2/G3 复判；**总预算 60 credits = 4 场主 A/B + 2 场 iter2**。 |
+| PASS | FAIL（下降 >50%） | FAIL | **ROLLBACK 回 v4.5b**（控制包 sha `6fb30100` 系），记录原因与场次；若已跑 iter2 且 iter2 仍 FAIL，则回 v4.5b 并登记「v5 机制方向不适用于当前对手池」 |
 | FAIL | — | — | **ROLLBACK 或先修**（若单张可归因对手导致，可再跑 1 场确认） |
 | 混杂 | — | — | **INCONCLUSIVE**：追加 2 场（需批准） |
 
