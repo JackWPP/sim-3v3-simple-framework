@@ -333,6 +333,58 @@ class Player:
             self.action = "attack:clear"
             return angle_to(ball.x, ball.y, clear_x, clear_y), KICK_POWER_CLEAR
 
+        # v4.0a(playbook §P0 + Lead m04364): 前场触球「推进 >=2.2m 或射门」。
+        # 帧级差距:对方三区触球 avg travel 0.75m/死触 80%/触后射门 3.2%,
+        # top 2.14m/36%/16%。触发:ball.x>0 且球速<1.0(静态/半静态球)。
+        ctx_now = ctx.now if ctx is not None else 0.0
+        prev_fb = getattr(self, "_front_ball_prev", None)
+        self._front_ball_prev = (ball.x, ball.y, ctx_now)
+        ball_speed = None
+        if prev_fb is not None:
+            dt_fb = ctx_now - prev_fb[2]
+            if 1e-3 <= dt_fb <= 0.5:
+                ball_speed = math.hypot(ball.x - prev_fb[0], ball.y - prev_fb[1]) / dt_fb
+        if ball.x > FRONT_THIRD_BALL_X and (
+            ball_speed is None or ball_speed < FRONT_PUSH_MAX_BALL_SPEED_MPS
+        ):
+            if dist_goal <= FRONT_SHOOT_RANGE_M:
+                their_keeper: Pose2D | None = None
+                keeper_dist = math.inf
+                for op in opp_poses:
+                    kd = math.hypot(op.x - goal_x, op.y - goal_y)
+                    if kd < keeper_dist:
+                        keeper_dist, their_keeper = kd, op
+                aim_abs = max(0.5, ctx.field.goal_width / 2.0 - FRONT_SHOT_INSET_M)
+                if their_keeper is not None and their_keeper.y > 0.0:
+                    aim_y = -aim_abs
+                elif their_keeper is not None and their_keeper.y < 0.0:
+                    aim_y = aim_abs
+                else:
+                    aim_y = aim_abs if ball.y <= 0.0 else -aim_abs
+                self.action = "attack:front_shoot"
+                return (
+                    angle_to(ball.x, ball.y, goal_x - 0.15, aim_y),
+                    FRONT_SHOT_POWER,
+                )
+            # 距门 >9.2m:向对方门方向推进 2.2m,横向避开最近对手 1.2m。
+            push_x = ball.x + FRONT_PUSH_MIN_M
+            push_y = ball.y
+            if nearest_opp is not None:
+                straight_d = abs(nearest_opp.y - ball.y)
+                if straight_d < FRONT_PUSH_OPP_CLEAR_M:
+                    push_y = ball.y + (
+                        FRONT_PUSH_OPP_CLEAR_M
+                        if nearest_opp.y >= ball.y
+                        else -FRONT_PUSH_OPP_CLEAR_M
+                    )
+            push_x = min(push_x, half_l - 1.2)
+            push_y = clamp(push_y, -half_w + 1.0, half_w - 1.0)
+            self.action = "attack:front_push"
+            return (
+                angle_to(ball.x, ball.y, push_x, push_y),
+                FRONT_PUSH_POWER,
+            )
+
         # 近门:射门。瞄向远离对方门将的一侧门内。
         if dist_goal <= SHOOT_RANGE_M:
             their_keeper: Pose2D | None = None

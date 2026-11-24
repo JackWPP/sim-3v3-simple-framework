@@ -441,3 +441,17 @@ SLOW_BALL_CLEAR_HOLD_S = 0.8         # 滞回保持时间(s)
 SLOW_BALL_TOUCHLINE_MARGIN_M = 1.0   # 慢球贴线判定
 SLOW_BALL_TOUCHLINE_PUSH_M = 1.8     # 贴线慢球沿长轴解围距离
 WATCHDOG_TOUCHLINE_PUSH_M = 1.5      # 看门狗贴线特判沿长轴推距
+
+# ---------------------------------------------------------------------------
+# v4.0a(playbook §P0 + Lead m04364): 前场触球「推进 ≥2.2m 或射门」。
+# 帧级差距(6 场 top 研究):对方三区触球 avg travel 0.75m/死触 80%/触后射门
+# 3.2%,top 2.14m/36%/16%;我们 0.5 球/场、2.9 射/场。只改前场推进/射门一处。
+# ---------------------------------------------------------------------------
+FRONT_THIRD_BALL_X = 0.0           # ball.x > 该值视为前场
+FRONT_PUSH_MAX_BALL_SPEED_MPS = 1.0  # 球速 < 该值视为静态/半静态球
+FRONT_SHOOT_RANGE_M = 9.2          # 前场静态球射程(原 SHOOT_RANGE_M 6.5)
+FRONT_SHOT_POWER = 9.0             # 前场射门力度(<= KICK_POWER_MAX 10)
+FRONT_SHOT_INSET_M = 0.45          # 瞄门柱内侧距离
+FRONT_PUSH_MIN_M = 2.2             # 推进最小推进距离(球向对方门方向)
+FRONT_PUSH_POWER = 7.0             # 推进踢力度
+FRONT_PUSH_OPP_CLEAR_M = 1.2       # 推进目标横向避开最近对手的距离
