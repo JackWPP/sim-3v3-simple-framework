@@ -853,7 +853,30 @@ class Player:
         elif now - wd["t0"] >= 3.0:
             moved = math.hypot(self.pose.x - wd["x"], self.pose.y - wd["y"])
             if moved < 0.12:
-                if d > GOAL_LINE_SHOT_CONTACT_M:
+                # v3.3d(c, analyst #46): 贴线特判——贴边线/贴底线时沿长轴推 1.5m,
+                # 不朝场心解围(场心方向常被夹取/绕球点在场外卡住;第 46 场贴线球
+                # approach↔clear 交替 25.2s 未触即同型)。
+                half_l = self.context.field.length / 2.0
+                half_w = self.context.field.width / 2.0
+                if abs(ball.y) > half_w - SLOW_BALL_TOUCHLINE_MARGIN_M:
+                    push_x = ball.x + WATCHDOG_TOUCHLINE_PUSH_M
+                    if push_x > half_l - 0.5:
+                        push_x = ball.x - WATCHDOG_TOUCHLINE_PUSH_M
+                    self.action = "attack:wd_clear"
+                    self.kick(
+                        angle_to(ball.x, ball.y, push_x, ball.y),
+                        KICK_POWER_LINE_CLEAR,
+                    )
+                elif abs(ball.x) > half_l - 1.0:
+                    push_x = ball.x + (
+                        WATCHDOG_TOUCHLINE_PUSH_M if ball.x < 0.0 else -WATCHDOG_TOUCHLINE_PUSH_M
+                    )
+                    self.action = "attack:wd_clear"
+                    self.kick(
+                        angle_to(ball.x, ball.y, push_x, ball.y),
+                        KICK_POWER_LINE_CLEAR,
+                    )
+                elif d > GOAL_LINE_SHOT_CONTACT_M:
                     self.action = "attack:wd_chase"
                     self.omni_move_toward((ball.x, ball.y), 1.6)
                 elif ball.x > half_l - 1.0:

@@ -431,6 +431,19 @@ def _set_play_kick_plan(
                     clamp(ball.y + side * 1.5, -half_w + 1.2, half_w - 1.2),
                 )
             power = SET_PLAY_LATERAL_POWER
+        # v3.3d(a, analyst #46): 贴线球第一脚沿长轴推(ball.x+2.0, ball.y),
+        # 不再朝场内斜踢——斜踢自出界会在同点重摆,把 taker 留在摆球点上,
+        # 裁判摆球时顶到身体即 R-06(第 46 场第三形态)。
+        if abs(ball.y) > half_w - SET_PLAY_TOUCHLINE_MARGIN_M:
+            push_x = ball.x + SET_PLAY_TOUCHLINE_PUSH_M
+            if push_x > half_length - SET_PLAY_TARGET_MARGIN_M:
+                push_x = ball.x - SET_PLAY_TOUCHLINE_PUSH_M
+            target = (
+                clamp(push_x, -half_length + SET_PLAY_TARGET_MARGIN_M,
+                      half_length - SET_PLAY_TARGET_MARGIN_M),
+                clamp(ball.y, -half_w + 1.2, half_w - 1.2),
+            )
+            power = SET_PLAY_LATERAL_POWER
     return angle_to(ball.x, ball.y, target[0], target[1]), power
 
 
@@ -687,22 +700,36 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         store.normal_attacker = attacker.id
         half_w_sb = context.field.width / 2.0
         side_sb = 1.0 if ball.y >= 0.0 else -1.0
-        clear_target = (
-            ball.x + SLOW_BALL_CLEAR_AHEAD_M,
-            side_sb * (half_w_sb - 0.3),
-        )
-        d_sb = dist(attacker.pose.x, attacker.pose.y, ball.x, ball.y) if attacker.pose is not None else 0.0
-        if d_sb > SLOW_BALL_CLEAR_CONTACT_M:
-            attacker.action = "slowball:approach"
-            attacker.omni_move_toward(
-                _field_point(context, ball.x, ball.y, 0.3),
-                speed=SLOW_BALL_APPROACH_SPEED_MPS,
-            )
+        # v3.3d(b, analyst #46): 贴线慢球沿长轴解围,不再朝边线/场心斜踢。
+        if abs(ball.y) > half_w_sb - SLOW_BALL_TOUCHLINE_MARGIN_M:
+            clear_target = (ball.x + SLOW_BALL_TOUCHLINE_PUSH_M, ball.y)
         else:
+            clear_target = (
+                ball.x + SLOW_BALL_CLEAR_AHEAD_M,
+                side_sb * (half_w_sb - 0.3),
+            )
+        d_sb = dist(attacker.pose.x, attacker.pose.y, ball.x, ball.y) if attacker.pose is not None else 0.0
+        # v3.3d(b): 滞回——进入 clear 后 0.8s 内只要 d<=0.60 不退回 approach。
+        # 旧逻辑 d 在 0.39-0.52 抖动时每 ~0.5s 交替 approach/clear,
+        # omni_move_toward 反复取消 kick 任务 → 球 9s+ 未动、global_game_stuck。
+        clear_until = getattr(store, "slowball_clear_until", 0.0)
+        in_clear = d_sb <= SLOW_BALL_CLEAR_CONTACT_M or (
+            context.now < clear_until and d_sb <= SLOW_BALL_CLEAR_RELEASE_M
+        )
+        if in_clear:
+            if d_sb <= SLOW_BALL_CLEAR_CONTACT_M:
+                store.slowball_clear_until = context.now + SLOW_BALL_CLEAR_HOLD_S
             attacker.action = "slowball:clear"
             attacker.kick(
                 angle_to(ball.x, ball.y, clear_target[0], clear_target[1]),
                 KICK_POWER_CLEAR,
+            )
+        else:
+            store.slowball_clear_until = 0.0
+            attacker.action = "slowball:approach"
+            attacker.omni_move_toward(
+                _field_point(context, ball.x, ball.y, 0.3),
+                speed=SLOW_BALL_APPROACH_SPEED_MPS,
             )
         if attacker.pose is not None:
             primary_pose = (attacker.pose.x, attacker.pose.y)
@@ -983,6 +1010,8 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     if store.prev_phase != Phase.OUR_SET_PLAY:
         store.set_play_taker = None
         store.ready_assignment = None
+        # v3.3d(a): 记录摆球点,用于判断第一脚是否已完成。
+        store.set_play_ball_start = (ball.x, ball.y)
     # v2.6:不再只选「离球最近」,改为「到球后方接近点(ball-kick_dir*1.0)最近」
     # 者优先并排除门将:线上 20c6a6cb 多次 12-32s 才完成第一脚,贴边线球
     # 最近者常绕不过来。probe 计划只用来自算 kick_dir,真正踢球方向下面重算。
@@ -1008,8 +1037,33 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
     rest = [p for p in players if p is not taker]
 
     kick_dir, power = _set_play_kick_plan(context, set_play, ball, taker.id, active_ids)
-    taker.action = f"setplay:{set_play.value}"
-    if dist(taker.pose.x, taker.pose.y, ball.x, ball.y) > SET_PLAY_NEAR_BALL_M:
+    # v3.3d(a): 第一脚完成后 taker 立刻向场内撤 >=1.0m,离开摆球点——
+    # 若第一脚自出界(同点重摆),taker 不在摆球点就不会被裁判摆球顶到(R-06)。
+    ball_start = getattr(store, "set_play_ball_start", None)
+    first_touch_done = (
+        ball_start is not None
+        and dist(ball.x, ball.y, ball_start[0], ball_start[1]) > SET_PLAY_FIRST_TOUCH_M
+    )
+    if first_touch_done:
+        half_w_p = context.field.width / 2.0
+        half_l_p = context.field.length / 2.0
+        if abs(ball.y) > half_w_p - SET_PLAY_TOUCHLINE_MARGIN_M:
+            rx = ball.x
+            ry = ball.y - (1.0 if ball.y >= 0.0 else -1.0) * SET_PLAY_TAKER_RETREAT_M
+        elif abs(ball.x) > half_l_p - SET_PLAY_TOUCHLINE_MARGIN_M:
+            rx = ball.x - (1.0 if ball.x >= 0.0 else -1.0) * SET_PLAY_TAKER_RETREAT_M
+            ry = ball.y
+        else:
+            dx_r, dy_r = -ball.x, -ball.y
+            n_r = math.hypot(dx_r, dy_r) or 1.0
+            rx = ball.x + dx_r / n_r * SET_PLAY_TAKER_RETREAT_M
+            ry = ball.y + dy_r / n_r * SET_PLAY_TAKER_RETREAT_M
+        taker.action = "setplay:retreat"
+        taker.omni_move_toward(
+            _field_point(context, rx, ry, 0.35),
+            speed=SET_PLAY_TAKER_RETREAT_SPEED_MPS,
+        )
+    elif dist(taker.pose.x, taker.pose.y, ball.x, ball.y) > SET_PLAY_NEAR_BALL_M:
         # 先绕到球的"踢球侧"(贴边线时会被夹进场内,足够接近后下一帧直接踢)。
         approach = _field_point(
             context,

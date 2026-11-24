@@ -420,3 +420,24 @@ BALL_OUT_PREDICT_MARGIN_M = 0.35
 BALL_OUT_PREDICT_MIN_SPEED_MPS = 0.2
 BALL_OUT_RETREAT_M = 2.8
 BALL_OUT_RETREAT_SPEED_MPS = 1.5
+
+# ---------------------------------------------------------------------------
+# v3.3d(analyst #46/#47 + Lead m04298): 重启自伤三处补丁
+# a) 我方 set play 贴线球第一脚沿长轴推(避免斜踢自出界→同点重摆→taker
+#    停在摆球点 0.04m 被裁判摆球顶到,第 46 场 R-06 第三形态);
+#    第一脚后 taker 向场内撤 >=1.0m,离开摆球点。
+# b) slowball 清除滞回:进入 clear 后 0.8s 内只要 d<=0.60 不退回 approach,
+#    避免 omni_move_toward 反复取消 kick 任务(第 46 场贴线球交替 21 次、
+#    25.2s 未触→global_game_stuck);贴线球解围沿长轴。
+# c) 看门狗贴线特判:贴边线/贴底线时沿长轴推 1.5m,不朝场心解围。
+# ---------------------------------------------------------------------------
+SET_PLAY_TOUCHLINE_MARGIN_M = 1.0    # 球距边线/底线小于该值视为贴线球
+SET_PLAY_TOUCHLINE_PUSH_M = 2.0      # 贴线球第一脚沿长轴的推进距离
+SET_PLAY_TAKER_RETREAT_M = 1.4       # 第一脚后 taker 向场内撤离距离
+SET_PLAY_TAKER_RETREAT_SPEED_MPS = 1.2
+SET_PLAY_FIRST_TOUCH_M = 0.4         # 球离开摆球点超过该值视为第一脚已完成
+SLOW_BALL_CLEAR_RELEASE_M = 0.60     # 滞回:进入 clear 后 d 超过该值才回 approach
+SLOW_BALL_CLEAR_HOLD_S = 0.8         # 滞回保持时间(s)
+SLOW_BALL_TOUCHLINE_MARGIN_M = 1.0   # 慢球贴线判定
+SLOW_BALL_TOUCHLINE_PUSH_M = 1.8     # 贴线慢球沿长轴解围距离
+WATCHDOG_TOUCHLINE_PUSH_M = 1.5      # 看门狗贴线特判沿长轴推距
