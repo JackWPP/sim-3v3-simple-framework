@@ -282,3 +282,13 @@ v3.0 = restore v2.16(535766a) + 2 patches（#22 越界分量夹取 + 门口容�
 - 离线候选包：sha256 `7adf3fe25c52711a4e851b054dde65cb13b017a9785261097c72969e9475b253`、864774B
 - 回放复演确认反抢分支生效：#94 0ab411d9 press:first 55/press:block 61/press:clear 6 帧；#74 fdef4682 95/104/9；#93 0ab411d9 压制对手场次为 0（无丢球事件）
 - 下一步：Step3 = Lever B box 终结（spec §3）
+
+### 13.3 Step3 = Lever B 禁区终结（box2 重写）
+- B-1.1 预置远门柱后点（`main.py::_act_normal` box2 块）：attacker 距球 ≤8.0 且 ball.x > half_l−2.5 时，第二人站 `(half_l−BOX2_SPOT_X_FROM_GOAL, −sign(ball.y)·BOX2_SPOT_Y)`，omni 1.9 m/s
+- B-1.2 补射：box 内（ball.x>half_l−3.0 且 |ball.y|<3.0）球速<1.0 或 2s 内出现快球(≥6 m/s，`store.fast_ball_until`) 且 box2 距球≤BOX2_CRASH_R → 直冲；d≤0.55 调 `Player.one_touch_finish()`（射门线无封堵 → power 8.5 瞄远门将侧；被封堵 → power 5.0 挑角清出）
+- B-2 边界：球离开 box → box2 回 `(BOX2_RESET_X, clamp(ball.y·0.5, ±2))` 并清 box2 状态；box2 永远从非门将 rest 中选
+- 新增参数（param “v5.0 Step3” 段）：BOX2_SPOT_X_FROM_GOAL=1.4、BOX2_SPOT_Y=0.9、BOX2_SPEED=1.9、BOX2_CRASH_R=2.0、BOX2_CONTACT_M=0.55、BOX2_SHOT_POWER=8.5、BOX2_SHOT_INSET_M=0.50、BOX2_SHOT_LANE_CLEAR_M=0.40、BOX2_CLEAR_POWER=5.0、BOX2_FAST_BALL_MPS=6.0、BOX2_FAST_BALL_WINDOW_S=2.0、BOX2_MIN_BALL_X_FROM_GOAL=3.0、BOX2_BOX_HALF_W=3.0、BOX2_RESET_X=0.5、BOX2_REST_R=1.5
+- 门禁：py_compile / check_names / static_check 全绿；replay_playcheck 最近 30 场 **PASS、0 异常**（/tmp/playcheck_v5step3.json）
+- 离线候选包：sha256 `6ef34e5ea7437c9c3ffaad712032fcd8b98b9d04e4725ba6c9935a2ae478d9a9`、865946B
+- 回放复演确认 box2 分支生效：#94 0ab411d9 box2_post 204/rebound 24/reset 2 帧；#93 f679fe57 985/74/1；box2:finish 未触发（回放中 d≤0.55 时球权多在 attacker 处，属预期；A/B 实测验证）
+- Step1/2/3 合计：v5 分支 3 commits（717972a / 6a04039 / step3），三机制均门禁绿、离线候选包 3 个（46cee9a2 → 7adf3fe2 → 6ef34e5e）

@@ -935,6 +935,58 @@ class Player:
         ty = ay + vy * t
         return tx, ty, dist(pose.x, pose.y, tx, ty), raw_t
 
+    def one_touch_finish(self) -> None:
+        """v5.0 Step3(Lever B, v5-spec §3):禁区第二点/补射一脚终结。
+
+        球在对方禁区(box)且 box2 距球 <= BOX2_CONTACT_M 时:ball→goal 线
+        BOX2_SHOT_LANE_CLEAR_M 内无对手 → 射门 power 8.5、瞄远门将侧 ±0.85;
+        被封堵 → 挑角清出 power 5.0 朝 (half_l-1.0, sign(ball.y)*1.2)。
+        """
+        ctx = self.context
+        ball = ctx.ball if ctx is not None else None
+        if ctx is None or ball is None or self.pose is None:
+            return
+        half_l = ctx.field.length / 2.0
+        goal_x, goal_y = opponent_goal(ctx)
+        aim_abs = max(0.5, ctx.field.goal_width / 2.0 - BOX2_SHOT_INSET_M)
+        their_keeper: Pose2D | None = None
+        keeper_dist = math.inf
+        opp_poses: list[Pose2D] = []
+        for opp in (ctx.opponents or {}).values():
+            if opp.pose is None:
+                continue
+            opp_poses.append(opp.pose)
+            kd = math.hypot(opp.pose.x - goal_x, opp.pose.y - goal_y)
+            if kd < keeper_dist:
+                keeper_dist, their_keeper = kd, opp.pose
+        if their_keeper is not None and abs(their_keeper.y) > 0.15:
+            aim_y = -aim_abs if their_keeper.y > 0.0 else aim_abs
+        else:
+            aim_y = -aim_abs if ball.y >= 0.0 else aim_abs
+        blocked = False
+        for op in opp_poses:
+            if (
+                _dist_point_to_segment(
+                    op.x, op.y, ball.x, ball.y, goal_x - 0.15, aim_y,
+                )
+                < BOX2_SHOT_LANE_CLEAR_M
+            ):
+                blocked = True
+                break
+        if not blocked:
+            self.action = "box2:finish"
+            self.kick(
+                angle_to(ball.x, ball.y, goal_x - 0.15, aim_y),
+                BOX2_SHOT_POWER,
+            )
+            return
+        side = 1.0 if ball.y >= 0.0 else -1.0
+        self.action = "box2:clear"
+        self.kick(
+            angle_to(ball.x, ball.y, half_l - 1.0, side * 1.2),
+            BOX2_CLEAR_POWER,
+        )
+
     def attack(self, kick_target: tuple[float, float] | None = None) -> None:
         """追球射门。踢向 ``kick_target``(默认对方球门中心)。
 

@@ -526,6 +526,26 @@ PRESS_DURATION_S = 2.0            # P1 反抢最长时长(之后回 support)
 RECOVER_FIRST_TOUCH_POWER = 5.5   # 夺回后第一脚最低力度(防慢速倒脚)
 RECOVER_WINDOW_S = 1.0            # 夺回后第一脚窗口
 
+# ---------------------------------------------------------------------------
+# v5.0 Step3(Lever B, v5-spec §3):禁区终结/第二点。box=ball.x>half_l-3.0 且
+# |ball.y|<3.0;box2 预置后点、补射一脚终结(挡射则挑角清出),传球者传后前插。
+# ---------------------------------------------------------------------------
+BOX2_SPOT_X_FROM_GOAL = 1.4       # 预置后点距门线
+BOX2_SPOT_Y = 0.9                 # 预置后点横向(远门柱侧)
+BOX2_SPEED = 1.9                  # box2 移动速度
+BOX2_CRASH_R = 2.0                # 补射触发半径(ball_speed<1 或 2s 内快球)
+BOX2_CONTACT_M = 0.55             # 一脚终结接触距离
+BOX2_SHOT_POWER = 8.5             # box 内射门力度
+BOX2_SHOT_INSET_M = 0.50          # box 射门瞄门柱内侧
+BOX2_SHOT_LANE_CLEAR_M = 0.40     # 射门线被封堵判定距离
+BOX2_CLEAR_POWER = 5.0            # 被封堵时挑角清出力度
+BOX2_FAST_BALL_MPS = 6.0          # 视为「射门/快球」的球速
+BOX2_FAST_BALL_WINDOW_S = 2.0     # 快球后补射窗口
+BOX2_MIN_BALL_X_FROM_GOAL = 3.0   # box 定义:ball.x > half_l - 该值
+BOX2_BOX_HALF_W = 3.0             # box 定义:|ball.y| < 该值
+BOX2_RESET_X = 0.5                # 2s 未触球且球离开 box → 回位 x
+BOX2_REST_R = 1.5                 # box2 距球 > 该值视为未参与
+
 
 # v4.2(P2, playbook §P2): 禁区第二人。attacker 在对方禁区前沿(ball.x >
 # half_l - 2.5)时,非门将第二人前插到 ball+2.5m(向门)+横向 1.2m 抢二点/

@@ -143,6 +143,10 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         store.press_until = None
         store.recover_until = 0.0
         store.touch_prev_speed = None
+        # v5.0 Step3(Lever B):box2 状态(当前 box2 id/预置时刻/最后快球时刻)。
+        store.box2_id = None
+        store.box2_since = None
+        store.fast_ball_until = 0.0
 
     @staticmethod
     def play(context: Context, players: list[Player], store) -> None:
@@ -758,6 +762,10 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     game = context.game
     speed = math.hypot(ball_vel[0], ball_vel[1]) if ball_vel is not None else None
 
+    # v5.0 Step3(Lever B):记录最近一次快球(射门/被扑出),供 box2 补射窗口。
+    if speed is not None and speed >= BOX2_FAST_BALL_MPS:
+        store.fast_ball_until = context.now + BOX2_FAST_BALL_WINDOW_S
+
     # v5.0 Step2(Lever C, v5-spec §4):丢球即反抢。丢球事件在 play() 里检测
     # (球速跃升 + last_touch_side 从 home 变 away);2.5s 窗口内、球不在对方
     # 三区时指派 P1(最近)/P2(次近)/P3(球在己方半场时第三人):P1 omni 直冲、
@@ -1004,36 +1012,85 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
             primary_pose = (attacker.pose.x, attacker.pose.y)
         rest = [p for p in field_players if p is not attacker]
 
-    # v4.2(P2, playbook §P2 + Lead m04364): 禁区第二人。attacker 在对方禁区
-    # 前沿时,第二人前插到 ball+2.5m(向门)+横向 1.2m 抢二点/补射。playbook
-    # 对比:top 队禁区 touch 4-10,我们 0-5;v4.1 3 场 box touch 0/0/5。
-    if attacker is not None and rest and ball.x > context.field.length / 2.0 - BOX_SECOND_BALL_X_OFFSET:
+    # v5.0 Step3(Lever B, v5-spec §3): 禁区第二人 box2 重写。
+    # B-1.1 预置远门柱后点:attacker 距球<=8.0 且 ball.x > half_l-2.5 时,第二人
+    #       站 (half_l-BOX2_SPOT_X_FROM_GOAL, -sign(ball.y)*BOX2_SPOT_Y), 1.9m/s。
+    # B-1.2 补射:box 内(ball.x>half_l-3.0 且 |ball.y|<3.0)球速<1.0 或 2s 内
+    #       有快球(>=6m/s)且 box2 距球<=BOX2_CRASH_R → 直冲;d<=0.55 一脚终结
+    #       (one_touch_finish:挡射则挑角清出)。
+    # B-2 边界:球离开 box → box2 回 (BOX2_RESET_X, clamp(ball.y*0.5,±2)) 并清状态;
+    #       box2 永不从 keeper 选(rest 已排除 keeper)。
+    half_l_b = context.field.length / 2.0
+    half_w_b = context.field.width / 2.0
+    box_zone = (
+        ball.x > half_l_b - BOX2_MIN_BALL_X_FROM_GOAL
+        and abs(ball.y) < BOX2_BOX_HALF_W
+    )
+    attacker_d = (
+        dist(attacker.pose.x, attacker.pose.y, ball.x, ball.y)
+        if attacker is not None and attacker.pose is not None
+        else None
+    )
+    fast_recent = context.now < getattr(store, "fast_ball_until", 0.0)
+    if (
+        attacker is not None
+        and rest
+        and attacker_d is not None
+        and attacker_d <= 8.0
+        and ball.x > half_l_b - BOX_SECOND_BALL_X_OFFSET
+    ):
         box2 = min(
             rest, key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
         )
-        gx2, gy2 = opponent_goal(context)
-        ux2, uy2 = gx2 - ball.x, gy2 - ball.y
-        un2 = math.hypot(ux2, uy2)
-        if un2 > 1e-6:
-            ux2, uy2 = ux2 / un2, uy2 / un2
+        box2_d = (
+            dist(box2.pose.x, box2.pose.y, ball.x, ball.y)
+            if box2.pose is not None
+            else 99.0
+        )
+        if (
+            box_zone
+            and (speed is None or speed < 1.0 or fast_recent)
+            and box2_d <= BOX2_CRASH_R
+        ):
+            if box2_d <= BOX2_CONTACT_M:
+                box2.action = "support:box2_finish"
+                box2.one_touch_finish()
+            else:
+                box2.action = "support:box2_rebound"
+                box2.omni_move_toward(
+                    _field_point(context, ball.x, ball.y, 0.4),
+                    speed=BOX2_SPEED,
+                )
         else:
-            ux2, uy2 = 1.0, 0.0
-        side2 = 1.0 if ball.y >= 0.0 else -1.0
-        bx2 = ball.x + BOX_SECOND_AHEAD_M * ux2 - BOX_SECOND_LATERAL_M * uy2 * side2
-        by2 = ball.y + BOX_SECOND_AHEAD_M * uy2 + BOX_SECOND_LATERAL_M * ux2 * side2
-        half_l2 = context.field.length / 2.0
-        half_w2 = context.field.width / 2.0
-        bx2 = clamp(bx2, 0.5, half_l2 - 0.6)
-        by2 = clamp(by2, -(half_w2 - 0.8), half_w2 - 0.8)
-        # v4.5(analyst 机制②):边路倒三角场景,box 第二人改去 (half_l-1.4, ±0.9)
-        # 抢点,配合 attack:cross 的落点。
-        if CROSS_X_MIN <= ball.x <= CROSS_X_MAX and abs(ball.y) > 1.0:
-            bx2 = half_l2 - BOX_CRASH_X_FROM_GOAL
-            by2 = (1.0 if ball.y >= 0.0 else -1.0) * BOX_CRASH_Y
-            by2 = clamp(by2, -(half_w2 - 0.8), half_w2 - 0.8)
-        box2.action = "support:box2"
-        box2.move_to_position((bx2, by2))
+            side_b = -1.0 if ball.y >= 0.0 else 1.0
+            tx_b = half_l_b - BOX2_SPOT_X_FROM_GOAL
+            ty_b = clamp(
+                side_b * BOX2_SPOT_Y, -(half_w_b - 0.8), half_w_b - 0.8,
+            )
+            box2.action = "support:box2_post"
+            box2.omni_move_toward(
+                _field_point(context, tx_b, ty_b, 0.4), speed=BOX2_SPEED,
+            )
+        store.box2_id = box2.id
+        if getattr(store, "box2_since", None) is None:
+            store.box2_since = context.now
         rest = [q for q in rest if q is not box2]
+    else:
+        prev_box2_id = getattr(store, "box2_id", None)
+        if prev_box2_id is not None:
+            prev_b2 = next((q for q in rest if q.id == prev_box2_id), None)
+            if (
+                prev_b2 is not None
+                and not box_zone
+                and prev_b2.pose is not None
+            ):
+                prev_b2.action = "support:box2_reset"
+                prev_b2.move_to_position(
+                    (BOX2_RESET_X, clamp(ball.y * 0.5, -2.0, 2.0)),
+                )
+                rest = [q for q in rest if q is not prev_b2]
+            store.box2_id = None
+            store.box2_since = None
 
     keeper.action = "guard"
     keeper.guard(ball_vel)
