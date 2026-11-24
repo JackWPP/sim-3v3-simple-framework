@@ -135,11 +135,11 @@ SET_PLAY_DEF_RADIAL_PULL_DIST_M = 2.4
 # 证据:两场 0:0 中 66-73% 比赛时间冻结在对方重启(单次 throwIn 48s 才触球),
 # 我方在 3.1m 轨道等待,二点球全丢。改为最近两人站球两侧 1.6m(>R-07 1.45m
 # +0.15m 余量),沿半径 1.6m 小幅摆动避免 M-05(球在 3m 内站 10s 会被罚)。
-OPP_RESTART_WAIT_R_M = 1.80      # v4.5:1.6→1.8(R-07 余量 0.35m)
-OPP_RESTART_TRIGGER_S = 1.5      # v4.5:3.0→1.5(更早到位,对方快发也来得及)
-OPP_RESTART_COUNTER_SPEED = 1.5
+OPP_RESTART_WAIT_R_M = 1.95      # v4.5b(analyst 帧级):1.8→1.95(R-07 硬约束:target 距球恒≥1.95)
+OPP_RESTART_TRIGGER_S = 3.0      # v4.5b:恢复 3.0(1.5s 会提前进危险区)
+OPP_RESTART_COUNTER_SPEED = 0.8  # v4.5b:1.5→0.8(高速+无阻尼会过冲/内切 0.2-0.35m 吃 R-07)
 OPP_RESTART_COUNTER_POWER = 6.0
-OPP_RESTART_SWING_RAD = 0.20
+OPP_RESTART_SWING_RAD = 0.0256   # v4.5b:±0.05m 微动(1.95m 半径),防 M-05 又不内切
 # v2.16:圆弧到位后按周期 ±0.2rad 微摆,避开 M-05「10s 几乎不动」判定(双保险)。
 SET_PLAY_DEF_ORBIT_SHUFFLE_RAD = 0.2
 SET_PLAY_DEF_ORBIT_SHUFFLE_PERIOD_S = 2.5

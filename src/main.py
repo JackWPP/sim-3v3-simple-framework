@@ -1344,8 +1344,16 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
                 tx_c = ball.x + rx_c * OPP_RESTART_WAIT_R_M
                 ty_c = ball.y + ry_c * OPP_RESTART_WAIT_R_M
                 tx_c, ty_c = _field_point(context, tx_c, ty_c, 0.3)
-                # 场边 clamp 后若离球 <1.55m,退回径向 1.7m 保证 R-07 余量。
-                if dist(tx_c, ty_c, ball.x, ball.y) < OPP_RESTART_WAIT_R_M - 0.05:
+                d_now_c = dist(p_c.pose.x, p_c.pose.y, ball.x, ball.y)
+                # v4.5b(analyst v44a-penalty-counter):R-07 根因是 counter 站位
+                # 控制器过冲/内切(1.58→1.41、1.60→1.23、3.52 过冲到 1.32)。
+                # 硬约束:①当前距球 <1.9m → 先纯径向退到 2.0m,不做横移;
+                # ②target 距球恒 ≥1.95m,场边 clamp 不够就退回径向 2.0m。
+                if d_now_c < OPP_RESTART_WAIT_R_M - 0.05:
+                    tx_c, ty_c = _away_from_ball_point(
+                        context, ball, p_c.pose, OPP_RESTART_WAIT_R_M + 0.05
+                    )
+                elif dist(tx_c, ty_c, ball.x, ball.y) < OPP_RESTART_WAIT_R_M:
                     tx_c, ty_c = _away_from_ball_point(
                         context, ball, p_c.pose, OPP_RESTART_WAIT_R_M + 0.1
                     )
