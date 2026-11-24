@@ -13,6 +13,10 @@
 - **样本量**：每组 ≥2 场有效场；若判为 INCONCLUSIVE 可追加 2 场（需 Lead/credits 批准）。**禁止用单场结论**。
 - **评分口径**：以「机制是否按预期生效 + 纪律是否破线 + 产出是否可接受」三闸门判定，不单看胜负（胜负受对手/乌龙/掉线污染）。
 
+### 1.1 预算档位（credits 不足时的降级口径）
+
+本文件 §1–§8 是 **A 档（40 credits，4 场）** 与 **B 档（150–250 credits，farm 续跑）** 的执行主体。credits=0 期间已预注册 **A-mini 降门槛档**：`docs/kb/reviews/v5-ab-mini-readout.md`（20 credits、2 场 0707 同对手配对，仅作 smoke/prescreen；B 出现射门归零→ITERATE，出现策略罚单/stuck→ROLLBACK，其余→升级 A 档）。A-mini 结论**不得**直接判 KEEP；三档的包轮换、判读产出物与回退步骤见该文件 §0–§5。
+
 ## 2. 有效场判定（violation 记录，不计入胜负/产出对比，但机制指标保留）
 
 1. sha/帧完整性通过（manifest + segments 齐全，`replay_playcheck` 0 异常）。
