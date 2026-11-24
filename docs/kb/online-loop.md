@@ -292,3 +292,60 @@ v3.0 = restore v2.16(535766a) + 2 patches（#22 越界分量夹取 + 门口容�
 - 离线候选包：sha256 `6ef34e5ea7437c9c3ffaad712032fcd8b98b9d04e4725ba6c9935a2ae478d9a9`、865946B
 - 回放复演确认 box2 分支生效：#94 0ab411d9 box2_post 204/rebound 24/reset 2 帧；#93 f679fe57 985/74/1；box2:finish 未触发（回放中 d≤0.55 时球权多在 attacker 处，属预期；A/B 实测验证）
 - Step1/2/3 合计：v5 分支 3 commits（717972a / 6a04039 / step3），三机制均门禁绿、离线候选包 3 个（46cee9a2 → 7adf3fe2 → 6ef34e5e）
+
+---
+
+## 14. v5.0 A/B 待跑（充值后执行，预算 40 credits）
+
+### 14.1 候选产物（已保护，build/candidates/）
+| 版本 | 本地候选包 | sha256 | 大小 | 说明 |
+|---|---|---|---|---|
+| v5.0 Step3（三机制） | `build/candidates/v5.0-step3-6ef34e5e.agent` | `6ef34e5e…` | 865946B | v5 分支 `dc9890d` 构建 |
+| v4.5b（线上默认 / 控制组） | `build/candidates/v4.5b-6fb30100.agent` | `6fb30100…` | 861653B | main `ef64d23` 重新构建；与线上提交包 `e7dcc0d6…` **同源码同字节大小**，sha 不同仅因 .agent 打包含时间戳/签名，非源码差异 |
+
+> 注意：`.agent` 构建不可复现，不要用 sha 判断线上版本；以 size + 源码 commit 为准。提交前 `python3 -m py_compile src/...` 不需要，直接提交对应候选包。
+
+### 14.2 配对设计（同对手/同段位，控制漂移）
+- Pair1：对手 **0707**（player_id `19b7f706-c6e2-48ac-9e19-0e5310ad0bf1`，约 1055）
+- Pair2：对手 **张原硕**（player_id `433ab70b-e502-4fbb-88d7-b72cfcd93921`，约 1076，历史 0:0 ×3，专测推进破密集）
+- 顺序（一次只开 1 场，配对间隔 ≤30 min）：
+  1. 提交 v4.5b → 打 0707（控制 Pair1）
+  2. 提交 v5.0 → 打 0707（测试 Pair1）
+  3. 提交 v4.5b → 打 张原硕（控制 Pair2）
+  4. 提交 v5.0 → 打 张原硕（测试 Pair2）
+- 若某对手二次邀不到：用同段位 ±50 替代并在记录中标注「非严格配对」。
+
+### 14.3 每场命令（L1）
+```bash
+cd /home/xgx/wpp1/sim-3v3-simple-framework
+# 0) token（页面在 9222，可自动取）
+cd /tmp && node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' 2>/dev/null | tr -d '"' > /tmp/.champ_token; cd -
+# 1) 提交对应版本为默认代码
+python3 tools/online_submit.py build/candidates/v4.5b-6fb30100.agent --display-name com.example.lqinternalmatch-v4.5b-ab
+python3 tools/online_submit.py build/candidates/v5.0-step3-6ef34e5e.agent --display-name com.example.lqinternalmatch-v5.0
+# 2) 向指定对手发起挑战（tools/online_challenge.py player <player_uuid>），拿 match_uuid
+python3 tools/online_challenge.py player 19b7f706-c6e2-48ac-9e19-0e5310ad0bf1   # 0707
+python3 tools/online_challenge.py player 433ab70b-e502-4fbb-88d7-b72cfcd93921   # 张原硕
+# 3) 等结果 + 归档 + 分析
+python3 /tmp/watch_match.py <match_uuid> > /tmp/ab_<short>_watch.log &
+bash /tmp/match_pipeline.sh <match_uuid> /tmp/ab_<short>_watch.log > /tmp/ab_<short>_pipe.log 2>&1 &
+# 4) 指标离线计算（spec §5 / §10）
+python3 /tmp/ra/v5accept.py <4 场 uuid...> --ctrl <2 控制场 uuid...>   # 汇总 §5 表 + 配对对比
+python3 /tmp/ra/press_loss.py <uuid> "Robot妙妙屋"                     # 反抢 recovery
+python3 /tmp/ra/box_metrics.py <uuid> "Robot妙妙屋"                    # box touch / box→shot
+```
+- 每场结束立刻记录：比分、我方罚单分项（R-06/R-07/M-02/inactive/fallen/stuck）、retake、ball 己方半场%、oobCaused、射正、box touch、rating 变化 → records.md 第 4 节「v5.0 A/B」表（新增小节）。
+
+### 14.4 判读标准（spec §6.2）
+1. **主指标**（≥2 项达标，且无一比控制组差 >20%）：
+   - progression travel（对方三区触后 1.5s）≥1.20m（基线 0.75）
+   - touch-to-shot% ≥8%（基线 3.2%）
+   - box touch/场 ≥4
+   - recovery ≤3s 比例 ≥60% 且中位 ≤0.9s
+2. **纪律红线**（v5 两场必须全 0）：R-06、R-07、M-02、inactive、fallen、global_game_stuck
+3. **结果不回归**：v5 两场积分（W3/D1/L0）≥ 控制两场；或积分持平但主指标 ≥2 项显著改善
+4. 任一红线失败 → 立刻停 A/B、`git revert` 对应 step、把 v4.5b 重新提交为默认，记录 rejected 与证据
+
+### 14.5 回滚动作
+- 若 v5.0 任一场出现红线罚单/异常：停跑剩余场次 → 提交 `build/candidates/v4.5b-6fb30100.agent`（display `com.example.lqinternalmatch-v4.5b-restore`）→ records 记「v5.0 rejected（原因+场次+证据）」→ 该 step 分支 commit `git revert <step>`，保留其余步骤。
+- 若仅指标未达标但纪律全 0：保留 v5 分支不 revert，记录「A/B 未通过，方向保留待下一版重试」。
