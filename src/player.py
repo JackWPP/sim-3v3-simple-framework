@@ -339,6 +339,40 @@ class Player:
             self.action = "attack:clear"
             return angle_to(ball.x, ball.y, clear_x, clear_y), KICK_POWER_CLEAR
 
+        # v4.5(analyst v43-00 机制②):边路倒三角。球在 x∈[4.0,6.2] 且 |y|>1.0 的
+        # 边路时,禁区有接应 → 传点球点后 0.5m(half_l-1.9,0) power 6.5;无接应
+        # → 射近角 |aim_y|=0.55(替代远端 ±0.85)。治两个 0:0 的「边路不传中」。
+        if CROSS_X_MIN <= ball.x <= CROSS_X_MAX and abs(ball.y) > 1.0:
+            receiver_ok = False
+            for mate in (ctx.teammates or {}).values():
+                if mate.pose is None:
+                    continue
+                if (
+                    mate.pose.x > ball.x + 0.5
+                    and mate.pose.x > half_l - 3.0
+                    and abs(mate.pose.y) < 2.2
+                ):
+                    receiver_ok = True
+                    break
+            if receiver_ok:
+                self.action = "attack:cross"
+                return (
+                    angle_to(
+                        ball.x, ball.y,
+                        half_l - CROSS_PULLBACK_X_FROM_GOAL, 0.0,
+                    ),
+                    CROSS_PULLBACK_POWER,
+                )
+            near_side = 1.0 if ball.y >= 0.0 else -1.0
+            self.action = "attack:cross_near_post"
+            return (
+                angle_to(
+                    ball.x, ball.y,
+                    goal_x - 0.15, near_side * CROSS_NEAR_POST_AIM_Y,
+                ),
+                FRONT_SHOT_POWER,
+            )
+
         # v4.0a(playbook §P0 + Lead m04364): 前场触球「推进 >=2.2m 或射门」。
         # 帧级差距:对方三区触球 avg travel 0.75m/死触 80%/触后射门 3.2%,
         # top 2.14m/36%/16%。触发:ball.x>0 且球速<1.0(静态/半静态球)。

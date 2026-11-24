@@ -638,38 +638,38 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
             )
         )
         if going_out:
-            out_retreater = min(
-                field_players,
-                key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
-            )
-    if out_retreater is not None:
-        # v4.2(#58):深位(x<-2)出界球撤向「场心方向」而不是己门 —— 角旗区朝己门
-        # 撤会贴边线走、路径擦球;朝场心 2.4m 能一次离开死地。
-        if ball.x < -2.0:
-            ux_o, uy_o = 0.0 - ball.x, 0.0 - ball.y
-        else:
-            gx_o, gy_o = own_goal(context)
-            ux_o, uy_o = gx_o - ball.x, gy_o - ball.y
-        un_o = math.hypot(ux_o, uy_o)
-        if un_o > 1e-6:
-            ux_o, uy_o = ux_o / un_o, uy_o / un_o
-        else:
-            ux_o, uy_o = -1.0, 0.0
-        out_retreater.release_kick()
-        # v4.1:目标 = ball + 2.4*unit(己门方向);x 不许越过 -(half_l-1.2),
-        # 若反而比球更靠后则改横向撤(y±2.4),避免把防守者塞回门线。
-        tx_o = ball.x + BALL_OUT_RETREAT_M * ux_o
-        ty_o = ball.y + BALL_OUT_RETREAT_M * uy_o
-        tx_o = max(tx_o, -(half_l_e - 1.2))
-        if tx_o < ball.x + 0.5 and ball.x < 0.0:
-            side_o = 1.0 if ball.y >= 0.0 else -1.0
-            tx_o, ty_o = ball.x, ball.y + side_o * BALL_OUT_RETREAT_M
-        out_retreater.action = "normal:out_retreat"
-        out_retreater.omni_move_toward(
-            _field_point(context, tx_o, ty_o, 0.4),
-            speed=BALL_OUT_RETREAT_SPEED_MPS,
-        )
-        field_players = [q for q in field_players if q is not out_retreater]
+            # v4.5(Lead m05101):球将出界瞬间,**所有**距球<2.2m 的非门将立即
+            # 径向退到距球 2.4m 处(1.6m/s),不等 setPlay 出现 —— 对方快发界外球
+            # 1-2s 就完成摆球+踢出,旧逻辑只撤最近一人且沿己门方向,追球人仍
+            # 停在摆球点旁 → kicker 触球瞬间 <1.45m 吃 R-07(m75 4 张)。
+            retreated: list[Player] = []
+            for p_r in list(field_players):
+                d_r = dist(p_r.pose.x, p_r.pose.y, ball.x, ball.y)
+                if d_r >= BALL_OUT_RETREAT_TRIGGER_M:
+                    continue
+                ux_r, uy_r = p_r.pose.x - ball.x, p_r.pose.y - ball.y
+                un_r = math.hypot(ux_r, uy_r)
+                if un_r < 1e-6:
+                    ux_r, uy_r = 0.0 - ball.x, 0.0 - ball.y
+                    un_r = math.hypot(ux_r, uy_r)
+                    if un_r < 1e-6:
+                        ux_r, uy_r, un_r = -1.0, 0.0, 1.0
+                ux_r, uy_r = ux_r / un_r, uy_r / un_r
+                p_r.release_kick()
+                p_r.action = "normal:out_retreat"
+                p_r.omni_move_toward(
+                    _field_point(
+                        context,
+                        ball.x + ux_r * BALL_OUT_RETREAT_M,
+                        ball.y + uy_r * BALL_OUT_RETREAT_M,
+                        0.4,
+                    ),
+                    speed=BALL_OUT_RETREAT_SPEED_MPS,
+                )
+                retreated.append(p_r)
+            if retreated:
+                out_retreater = retreated[0]
+                field_players = [q for q in field_players if q not in retreated]
     # v4.3(P0-B, analyst v42 §4.5):球已出界(含我方 last touch 被判对方重启)时,
     # 非门将退到摆球点 1.2m 外。旧 out_retreat 只预判「将出界」且要求球速>0.2,
     # 慢推/已出界会漏判 → 同点摆球时被摆进身体 R-06(#46/#58/2dd@726.9 同族)。
@@ -888,6 +888,12 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         half_w2 = context.field.width / 2.0
         bx2 = clamp(bx2, 0.5, half_l2 - 0.6)
         by2 = clamp(by2, -(half_w2 - 0.8), half_w2 - 0.8)
+        # v4.5(analyst 机制②):边路倒三角场景,box 第二人改去 (half_l-1.4, ±0.9)
+        # 抢点,配合 attack:cross 的落点。
+        if CROSS_X_MIN <= ball.x <= CROSS_X_MAX and abs(ball.y) > 1.0:
+            bx2 = half_l2 - BOX_CRASH_X_FROM_GOAL
+            by2 = (1.0 if ball.y >= 0.0 else -1.0) * BOX_CRASH_Y
+            by2 = clamp(by2, -(half_w2 - 0.8), half_w2 - 0.8)
         box2.action = "support:box2"
         box2.move_to_position((bx2, by2))
         rest = [q for q in rest if q is not box2]
@@ -1290,6 +1296,33 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
         static_s = context.now - getattr(
             store, "opp_restart_static_since", context.now
         )
+        if static_s <= OPP_RESTART_TRIGGER_S and rest:
+            # v4.5(Lead m05101):对方快发是常态(1-2s)。摆球/静置尚未达触发
+            # 阈值时,任何距球<2.2m 的 rest 先以 1.6m/s 径向退到 2.4m,避免
+            # kicker 触球瞬间被判 R-07(m75 161.0/650.2 共 4 张,位置距球 1.0-1.2m)。
+            pre_retreat: list[Player] = []
+            for p_pre in list(rest):
+                d_pre = dist(p_pre.pose.x, p_pre.pose.y, ball.x, ball.y)
+                if d_pre >= BALL_OUT_RETREAT_TRIGGER_M:
+                    continue
+                ux_p, uy_p = p_pre.pose.x - ball.x, p_pre.pose.y - ball.y
+                un_p = math.hypot(ux_p, uy_p)
+                if un_p < 1e-6:
+                    ux_p, uy_p, un_p = -1.0, 0.0, 1.0
+                ux_p, uy_p = ux_p / un_p, uy_p / un_p
+                p_pre.release_kick()
+                p_pre.action = "opp_setplay:pre_retreat"
+                p_pre.omni_move_toward(
+                    _field_point(
+                        context,
+                        ball.x + ux_p * OPP_RESTART_PRE_RETREAT_R_M,
+                        ball.y + uy_p * OPP_RESTART_PRE_RETREAT_R_M,
+                        0.3,
+                    ),
+                    speed=OPP_RESTART_PRE_RETREAT_SPEED_MPS,
+                )
+                pre_retreat.append(p_pre)
+            rest = [q for q in rest if q not in pre_retreat]
         if static_s > OPP_RESTART_TRIGGER_S and rest:
             gx_c, gy_c = own_goal(context)
             counter_players = sorted(
@@ -1312,7 +1345,7 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
                 ty_c = ball.y + ry_c * OPP_RESTART_WAIT_R_M
                 tx_c, ty_c = _field_point(context, tx_c, ty_c, 0.3)
                 # 场边 clamp 后若离球 <1.55m,退回径向 1.7m 保证 R-07 余量。
-                if dist(tx_c, ty_c, ball.x, ball.y) < 1.55:
+                if dist(tx_c, ty_c, ball.x, ball.y) < OPP_RESTART_WAIT_R_M - 0.05:
                     tx_c, ty_c = _away_from_ball_point(
                         context, ball, p_c.pose, OPP_RESTART_WAIT_R_M + 0.1
                     )

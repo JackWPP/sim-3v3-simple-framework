@@ -135,8 +135,8 @@ SET_PLAY_DEF_RADIAL_PULL_DIST_M = 2.4
 # 证据:两场 0:0 中 66-73% 比赛时间冻结在对方重启(单次 throwIn 48s 才触球),
 # 我方在 3.1m 轨道等待,二点球全丢。改为最近两人站球两侧 1.6m(>R-07 1.45m
 # +0.15m 余量),沿半径 1.6m 小幅摆动避免 M-05(球在 3m 内站 10s 会被罚)。
-OPP_RESTART_WAIT_R_M = 1.60
-OPP_RESTART_TRIGGER_S = 3.0
+OPP_RESTART_WAIT_R_M = 1.80      # v4.5:1.6→1.8(R-07 余量 0.35m)
+OPP_RESTART_TRIGGER_S = 1.5      # v4.5:3.0→1.5(更早到位,对方快发也来得及)
 OPP_RESTART_COUNTER_SPEED = 1.5
 OPP_RESTART_COUNTER_POWER = 6.0
 OPP_RESTART_SWING_RAD = 0.20
@@ -427,13 +427,13 @@ GOAL_MOUTH_ROBOT_MAX_X = 7.12
 # ---------------------------------------------------------------------------
 BALL_OUT_PREDICT_MARGIN_M = 0.35
 BALL_OUT_PREDICT_MIN_SPEED_MPS = 0.2
-BALL_OUT_RETREAT_M = 2.4  # v4.1(analyst spec §四):撤位目标 ball+2.4*unit(己门)
-BALL_OUT_RETREAT_SPEED_MPS = 1.5
+BALL_OUT_RETREAT_M = 2.4         # v4.5:撤到距球 2.4m 的径向点  # v4.1(analyst spec §四):撤位目标 ball+2.4*unit(己门)
+BALL_OUT_RETREAT_SPEED_MPS = 1.6
 # v4.3(P0-B, analyst v42-4matches §4.5):我方 last touch 出界被判对方重启后,
 # 非门将必须退出摆球点 1.2m(旧 out_retreat 只预判「球将出界」,慢推/已出界
 # 时漏判 → 同点摆球被摆进身体 R-06/R-07,#46/#58/2dd@726.9 同族)。
-RESTART_OUT_RETREAT_M = 1.2
-RESTART_OUT_RETREAT_SPEED_MPS = 1.2
+RESTART_OUT_RETREAT_M = 2.4      # v4.5:1.2→2.4(快发界外球 R-07 修复)
+RESTART_OUT_RETREAT_SPEED_MPS = 1.6
 # v4.3(P0-A):line_clear 贴线球沿长轴推 1.5m(旧逻辑朝场心 (0,0),后侧点越线
 # → _safe_kick_direction 不可达 hover 20s,inactiveRobot@632.17)。
 LINE_CLEAR_TOUCHLINE_MARGIN_M = 0.30
@@ -496,3 +496,18 @@ FRONT_SHOOT_LATERAL_MARGIN_M = 0.30
 BOX_SECOND_BALL_X_OFFSET = 2.5
 BOX_SECOND_AHEAD_M = 2.5
 BOX_SECOND_LATERAL_M = 1.2
+
+# v4.5(Lead m05101 预撤 + analyst 机制②):球将出界瞬间,所有距球<2.2m 的非门将
+# 立即径向退到 2.4m(1.6m/s),不等 setPlay 出现(对方快发 1-2s 就完成摆球踢出)。
+BALL_OUT_RETREAT_TRIGGER_M = 2.2
+# 对方重启静置未达触发阈值前的预撤半径/速度。
+OPP_RESTART_PRE_RETREAT_R_M = 2.4
+OPP_RESTART_PRE_RETREAT_SPEED_MPS = 1.6
+# v4.5 机制②(analyst v43-00):边路倒三角 + 近角射门。
+CROSS_X_MIN = 4.0
+CROSS_X_MAX = 6.2
+CROSS_PULLBACK_X_FROM_GOAL = 1.9   # 落点 x = half_l - 1.9(点球点后 0.5m)
+CROSS_PULLBACK_POWER = 6.5
+CROSS_NEAR_POST_AIM_Y = 0.55       # 无接应时射近角 |aim_y|
+BOX_CRASH_X_FROM_GOAL = 1.4        # 倒三角时 box 第二人抢点 x
+BOX_CRASH_Y = 0.9
