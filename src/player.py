@@ -877,9 +877,15 @@ class Player:
                     SHOOT_POWER_MAX,
                 )
                 return
-            if abs(ball.x) > half_l - 1.0 or abs(ball.y) > half_w - 1.0:
+            if (
+                (abs(ball.x) > half_l - 1.0 or abs(ball.y) > half_w - 1.0)
+                and abs(ball.x) < half_l
+                and abs(ball.y) < half_w
+            ):
                 # 贴线活球:朝场中心解围。不要把球往场外踢(v1.10 的"保持距离"
                 # 分支反而让球 30s 无人触碰 → global_game_stuck；headless-04/05 实测)。
+                # v3.3b(Lead m04025 第 3 条):只处理场内贴线球;球已出界时不追不踢,
+                # 交给出界/摆球流程,避免追到场外把球顶出线送 R-06。
                 self.action = "attack:line_clear"
                 self.kick(angle_to(ball.x, ball.y, 0.0, 0.0), KICK_POWER_LINE_CLEAR)
                 return

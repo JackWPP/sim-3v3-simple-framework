@@ -1116,6 +1116,17 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
     for i, p in enumerate(rest):
         d_ball = dist(p.pose.x, p.pose.y, ball.x, ball.y)
         target = _defender_set_play_spot(context, ball, laterals[i % len(laterals)])
+        # v3.3b(Lead m04025 第 2 条):界外/待摆期非门将禁止进入球的 1.6m 圈
+        # (throwIn/corner/goalKick 全类型);等待点若被场边夹到 <1.6m 则径向推出去。
+        if dist(target[0], target[1], ball.x, ball.y) < SET_PLAY_DEF_MIN_CLEAR_M - 0.1:
+            dx, dy = target[0] - ball.x, target[1] - ball.y
+            dd = math.hypot(dx, dy)
+            if dd < 1e-6:
+                dx, dy, dd = -1.0, 0.0, 1.0
+            push = SET_PLAY_DEF_MIN_CLEAR_M + 0.1
+            target = _field_point(
+                context, ball.x + dx / dd * push, ball.y + dy / dd * push, 0.3
+            )
         if d_ball < SET_PLAY_DEF_RADIAL_PULL_DIST_M:
             # v2.15:已进入 R-07(1.45m)红线外侧缓冲带:先纯径向退到 3.1m。
             # v2.16:弦线下界只在起点在圆上时成立(analyst m02284),1.7–2.4m
@@ -1127,18 +1138,20 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
             ex, ey = _field_point(context, target[0], target[1], 0.3)
             d_escape = dist(ex, ey, ball.x, ball.y)
             if d_escape < max(SET_PLAY_DEF_MIN_CLEAR_M, d_ball + 0.05):
-                ux, uy = (p.pose.x - ball.x) / max(d_ball, 1e-6), (
-                    p.pose.y - ball.y
-                ) / max(d_ball, 1e-6)
-                best = None
-                for sgn in (1.0, -1.0):
-                    cx = ball.x + (-uy) * sgn * SET_PLAY_DEF_ORBIT_RADIUS_M
-                    cy = ball.y + (ux) * sgn * SET_PLAY_DEF_ORBIT_RADIUS_M
-                    cx, cy = _field_point(context, cx, cy, 0.3)
-                    cd = dist(cx, cy, ball.x, ball.y)
-                    if best is None or cd > best[0]:
-                        best = (cd, cx, cy)
-                _, ex, ey = best
+                # v3.3b(Lead m04025 / analyst #43 根因):径向目标被场边夹到 <1.7m 时,
+                # 旧逻辑跳到「切向 3.1m 轨道点」并直线冲刺 —— 弦线离球最近仅约
+                # 0.47m(≈机身+球 0.44m),实车 427.5s 起 1.2m/s 冲刺把球顶出线 → R-06。
+                # 现在只允许:①沿「球→机器人」径向小步(每帧 0.5m)外移;②径向被夹
+                # 到无法再远离时,沿切向小步(0.4m)挪位。禁止长弦直线冲刺。
+                ux = (p.pose.x - ball.x) / max(d_ball, 1e-6)
+                uy = (p.pose.y - ball.y) / max(d_ball, 1e-6)
+                ex = p.pose.x + ux * 0.5
+                ey = p.pose.y + uy * 0.5
+                ex, ey = _field_point(context, ex, ey, 0.3)
+                if dist(ex, ey, ball.x, ball.y) <= d_ball + 0.02:
+                    ex = p.pose.x - uy * 0.4
+                    ey = p.pose.y + ux * 0.4
+                    ex, ey = _field_point(context, ex, ey, 0.3)
             p.action = "opp_setplay:radial_escape"
             p.omni_move_toward((ex, ey))
         elif d_ball < SET_PLAY_DEF_SAFE_DIST_M:
@@ -1171,12 +1184,18 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
             ty = ball.y + math.sin(a) * SET_PLAY_DEF_ORBIT_RADIUS_M
             ox, oy = _field_point(context, tx, ty, 0.3)
             if dist(ox, oy, ball.x, ball.y) < SET_PLAY_DEF_MIN_CLEAR_M:
-                # 贴边/角球时圆弧点会被夹进场内(离球变近),退回径向撤离。
-                target = _away_from_ball_point(
-                    context, ball, p.pose, SET_PLAY_DEF_ORBIT_RADIUS_M
-                )
+                # v3.3b:圆弧点被夹进场内(离球变近)时,不做长弦冲刺,只走径向小步。
+                ux = (p.pose.x - ball.x) / max(d_ball, 1e-6)
+                uy = (p.pose.y - ball.y) / max(d_ball, 1e-6)
+                ex = p.pose.x + ux * 0.5
+                ey = p.pose.y + uy * 0.5
+                ex, ey = _field_point(context, ex, ey, 0.3)
+                if dist(ex, ey, ball.x, ball.y) <= d_ball + 0.02:
+                    ex = p.pose.x - uy * 0.4
+                    ey = p.pose.y + ux * 0.4
+                    ex, ey = _field_point(context, ex, ey, 0.3)
                 p.action = "opp_setplay:radial_escape"
-                p.omni_move_toward(target)
+                p.omni_move_toward((ex, ey))
             else:
                 p.action = "opp_setplay:orbit"
                 p.omni_move_toward((ox, oy))
@@ -1216,10 +1235,9 @@ def _act_stopped(context: Context, players: list[Player], store) -> None:
         store.stopped_detect_at = context.now
     elapsed = context.now - getattr(store, "stopped_since", context.now)
 
-    # v3.2(Lead m03816):删除 stopped 摆球期的 vacate/crawl/hold 全部移动,改为全停。
-    # 数据结论:裁判 1.5s 宽限内「撤到 1.45m 外」与 M-02(位移>0.3m)不可兼得 ——
-    # v3.1/v3.1b 的 vacate 窗口把 4 张 stopped_motion 带回来(0.304–0.339m 全边际
-    # 超阈);而 R-06/R-07 改由活球期 P0-1 出界预判撤位 + P1 贴线 taker 修复解决。
+    # v3.3b(Lead m04025):摆球期保持全停(analyst 否决纯慢爬:3s 摆球期 0.12m/s
+    # 累计 0.36m 会踩 M-02;而 R-07 豁免需 >=0.12m/s,M-02 要慢/R-07 要快不可兼得)。
+    # R-06 改由 `_act_opp_set_play` 的几何修复解决(禁切向直线冲刺,贴边径向小步)。
     for p in players:
         p.action = "stopped"
         p.stop()
