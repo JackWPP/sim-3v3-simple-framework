@@ -159,5 +159,6 @@ v2.7 `_act_normal` presser 分支裸 `ball`），两次都被 framework `runtime
 |---|---|---|---|---|---|---|
 | 43 | 北京市第二中学分校张原硕同学3(1059) | 0:0 平 | 1 (R-06) | 0/1/0 | 37.1% | 不达标（R-06、0 进球） |
 | 44 | Leinstein(1040) | 1:5 负 | 0 | 0/0/0 | 61.8% | 不达标（失 5、ball>60） |
+| 45 | 2026-11-24 09:08 | v3.3b (ver39) | 蓝色禁区 | 1007 | **3:0 胜** | 1 | 0 | 进球 sim45.16/172.15/571.69（全 home）、0 失球；我方 1 罚 **inactiveRobot robot1@sim339.21**（rule Inactive robot，ballDistance 未读，8s+ 近球不动）、对方 0；retake 0；我方 M-02/R-06/R-07=0；home avg_pair、min_pair<1m 13.5%、avg_nearest 4.42m、ball_in_home_half **6.6%**；64 段 sha 64/64、5546 帧、637.3s；rating 998→1015（+17），对方 1007→943（−64）；counted=true | v3.3b 小样本 1/2：**验收全项达标**（0 M-02/R-06/R-07、罚单 1≤1、ball 6.6%≤60、失球 0≤2、进球 3≥1）；唯一问题 inactiveRobot 1 张（M-05 旧问题） | 待 analyst（重点 inactiveRobot + 3 球链路） | **有效** |
 
 结论：**v3.3 rejected**。己方三区慢球「强制接触+定向解围」未改善失球（2 场 0:0/1:5、失 5 球），且未消除 R-06（#43 为 radial_escape 弦线触球）。v3.3 保留 commit 9b29aa5 作对照；**v3.2（ver37）仍为长期基线候选**。下一步 v3.3b（Lead m04025）= v3.3 + 三处几何修复（chord 禁长弦冲刺、待摆期非门将 1.6m 圈、line_clear 只处理场内球），保留摆球期全停。
