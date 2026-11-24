@@ -843,6 +843,32 @@ class Player:
                 return
 
         d = dist(self.pose.x, self.pose.y, ball.x, ball.y)
+        # v3.3c(Lead m04189 P1):进攻死锁看门狗。attacker 连续 3s 有进攻意图但
+        # 位移 <0.12m(几何不可达/绕球点在场外等)时,强制贴球或踢一次解围,
+        # 避免近球不动 >10s 吃 inactiveRobot(第 45 场门线死锁同型:31.9/19.9/29.4s)。
+        now = self.context.now if self.context is not None else 0.0
+        wd = getattr(self, "_attack_wd", None)
+        if wd is None:
+            self._attack_wd = {"t0": now, "x": self.pose.x, "y": self.pose.y}
+        elif now - wd["t0"] >= 3.0:
+            moved = math.hypot(self.pose.x - wd["x"], self.pose.y - wd["y"])
+            if moved < 0.12:
+                if d > GOAL_LINE_SHOT_CONTACT_M:
+                    self.action = "attack:wd_chase"
+                    self.omni_move_toward((ball.x, ball.y), 1.6)
+                elif ball.x > half_l - 1.0:
+                    self.action = "attack:wd_shot"
+                    self.kick(
+                        angle_to(ball.x, ball.y, half_l + 0.5,
+                                 clamp(ball.y * 0.5, -1.1, 1.1)),
+                        SHOOT_POWER_MAX,
+                    )
+                else:
+                    self.action = "attack:wd_clear"
+                    self.kick(angle_to(ball.x, ball.y, 0.0, 0.0), KICK_POWER_LINE_CLEAR)
+                self._attack_wd = {"t0": now, "x": self.pose.x, "y": self.pose.y}
+                return
+            self._attack_wd = {"t0": now, "x": self.pose.x, "y": self.pose.y}
         self._kicking = d <= (KICK_EXIT_M if self._kicking else KICK_ENTER_M)
         if self._kicking:
             half_l = self.context.field.length / 2.0
@@ -857,6 +883,17 @@ class Player:
                 ball.x > half_l - 1.0
                 and abs(ball.y) <= goal_half + GOAL_LINE_SHOT_Y_MARGIN_M
             ):
+                # v3.3c(Lead m04189 P0 / analyst #45):恢复 v2.21 #23「距球 <=0.55m
+                # 即射」——旧 approach 目标 ball.x-0.45 与射门门限 ball.x-0.2 之间
+                # 隔着 ARRIVE_DIST 0.15,几何不可达导致门线补射死锁 30s+(第 45 场)。
+                if d <= GOAL_LINE_SHOT_CONTACT_M:
+                    aim_y = clamp(ball.y * 0.5, -(goal_half - 0.2), goal_half - 0.2)
+                    self.action = "attack:goal_line_shot"
+                    self.kick(
+                        angle_to(ball.x, ball.y, half_l + 0.5, aim_y),
+                        SHOOT_POWER_MAX,
+                    )
+                    return
                 if self.pose.x <= ball.x - 0.2:
                     self.release_kick()
                     self.action = "attack:goal_line_approach"

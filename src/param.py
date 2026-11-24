@@ -327,6 +327,10 @@ STOP_EARLY_BURST_SPEED = 0.3
 # v2.16(analyst m02284「低」):门线补射只在球位于球门正面时用;|ball.y| 超过
 # goal_half+该余量(角旗区)时仍走 line_clear,避免从底线外斜踢变对方门球。
 GOAL_LINE_SHOT_Y_MARGIN_M = 0.6
+# v3.3c(Lead m04189 / analyst #45):门线补射死锁修复——距球 <=0.55m 即射,
+# 不再要求 pose.x>ball.x-0.2(v2.16 approach 目标 ball.x-0.45 + ARRIVE_DIST 0.15
+# 几何上最多到 ball.x-0.30,永远差 0.10m 射不了;v2.21 #23 修过、v3.0 restore 丢失)。
+GOAL_LINE_SHOT_CONTACT_M = 0.55
 # v2.16(Lead m02385,低风险防守改动):失球后 3s 内非门将 support 的后撤深度
 # 限制在 x≥-2.0(不许随球一路退进禁区),门将解围后不追球。第 11 场
 # 14.6/69.0/237.2 三个早期失球都是首波被打穿/连续丢球。
