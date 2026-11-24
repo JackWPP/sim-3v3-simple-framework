@@ -257,3 +257,19 @@ v3.0 = restore v2.16(535766a) + 2 patches（#22 越界分量夹取 + 门口容�
 | 92 | 17:33 | v4.5b ver48 | 0707(1055) | 0:0 平 | 0 | 30.4% / 17.8% | 最后3场 1/3；rating 1248→1237 |
 | 93 | 17:53 | v4.5b ver48 | 蓝色禁区1(995) | 4:0 胜 | 2 | 0.0% / 17.6% | 最后3场 2/3；rating 1237→1244 |
 | 94 | 18:08 | v4.5b ver48 | 如果以后(1005) | 5:0 胜 | 0 | 32.2% / 26.1% | 最后3场 3/3；终局 rating 1244→1251 |
+
+## 13. v5.0 候选（离线准备，credits=0，不下单/不提交线上）
+
+2026-11-24 晚：按 `docs/kb/reviews/v5-spec.md`（analyst da35a69）在分支 `v5` 从 v4.5b（ef64d23）开始实现；main 保持 v4.5b 不动。
+
+### 13.1 Step1 = Lever A 前场推进/射门分区门控
+- Z3 贴线/贴底（`|ball.y|>4.20` 或 `ball.x>6.40`）：不射门，沿长轴推 1.5m、power 5.0
+- Z1 终结（`d≤6.5`）：power 9.0、瞄远门将侧 ±0.85；射门射线 1.2m 内有对手封堵 → 改推进
+- Z2 推进（`6.5<d≤12`）：power 7.0、向门 2.2m、横向避最近对手 1.2m；两侧被封朝中线斜推
+- Z2b 远距（`d>12`）：线路 1.5m 内无对手 → 低平 pass 到对方半场边线 power 6.0，否则沿 x 推 2.2m
+- A-3.1 卡住回退：前场踢球任务 1.5s 球位移<0.3m → `release_kick()` + 射门冷却 1.0s（交 3s 看门狗）
+- 新增参数（param “v5.0 Step1” 段）：FRONT_Z2_MAX_DIST_M=12.0、FRONT_Z2B_POWER=6.0、FRONT_BLOCK_LINE_CLEAR_M=1.2、FRONT_SHOT_COOLDOWN_S=1.0、FRONT_Z3_BALL_X_MARGIN_M=0.60、FRONT_Z3_PUSH_M=1.5、FRONT_Z3_POWER=5.0、FRONT_Z2B_LANE_CLEAR_M=1.5、FRONT_KICK_STALL_S=1.5、FRONT_KICK_STALL_M=0.3
+- 门禁：py_compile / check_names / static_check 全绿；replay_playcheck 最近 30 场 **PASS、0 异常**（/tmp/playcheck_v5step1.json）
+- 离线候选包：`build/com.example.lqinternalmatch-1.1.0.agent` sha256 `46cee9a2b72deb83d1b9108a1cb1823eed5ac4c6b0b3f0fe3f3d87851aedb0b8`、862871B
+- 回放复演（只统计 `_coordinated_kick_plan` 返回动作，#93/#94/#64）：front_push 287/191/64、front_shoot 10/25/12、front_touchline_push 2/77/0、front_pass 0（Z2b 未触发：需 ball>12m 且 x>0，正常）
+- 下一步：Step2 = Lever C 反抢（spec §4）；Step3 = Lever B box 终结（spec §3）

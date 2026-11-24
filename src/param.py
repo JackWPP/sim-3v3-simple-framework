@@ -489,6 +489,22 @@ KEEPER_TRACK_DEADBAND_M = 0.04     # v4.3(A1):死区 0.06→0.04,横移响应 52
 # 改沿长轴轻推;证据 #52 10 射 0 正、贴线球空转 25s。
 FRONT_SHOOT_LATERAL_MARGIN_M = 0.30
 
+# ---------------------------------------------------------------------------
+# v5.0 Step1(Lever A, v5-spec §2):前场推进/射门分区门控。目标:对方三区
+# 触后 travel 0.75→≥1.20m、touch-to-shot 3.2%→≥8%、射正/场 ≥3。
+# 只新增参数,不动 v4.x 同名参数,便于 A/B 对照。
+# ---------------------------------------------------------------------------
+FRONT_Z2_MAX_DIST_M = 12.0        # Z2 推进区上限(距门 >12m 走 Z2b 低平 pass)
+FRONT_Z2B_POWER = 6.0             # Z2b 低平 pass 力度
+FRONT_BLOCK_LINE_CLEAR_M = 1.2    # Z1 射门射线被最近对手封堵的判定距离
+FRONT_SHOT_COOLDOWN_S = 1.0       # 射门后冷却(期间改推进,避免连射/空射)
+FRONT_Z3_BALL_X_MARGIN_M = 0.60   # ball.x > half_l-0.60 视为贴底
+FRONT_Z3_PUSH_M = 1.5             # Z3 沿长轴推距离
+FRONT_Z3_POWER = 5.0              # Z3 沿长轴推力度(不射门)
+FRONT_Z2B_LANE_CLEAR_M = 1.5      # Z2b pass 线路被对手封堵的判定距离
+FRONT_KICK_STALL_S = 1.5          # 前场踢球任务 1.5s 未执行视为卡住
+FRONT_KICK_STALL_M = 0.3          # 球位移 <0.3m 视为未执行
+
 
 # v4.2(P2, playbook §P2): 禁区第二人。attacker 在对方禁区前沿(ball.x >
 # half_l - 2.5)时,非门将第二人前插到 ball+2.5m(向门)+横向 1.2m 抢二点/

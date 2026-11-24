@@ -83,6 +83,22 @@ def _behind_ball(
     return (ball_x - ux * offset, ball_y - uy * offset)   # 背离 aim 退 offset
 
 
+
+
+def _dist_point_to_segment(
+    px: float, py: float, ax: float, ay: float, bx: float, by: float,
+) -> float:
+    """点 (px,py) 到线段 (ax,ay)-(bx,by) 的距离(v5.0 Lever A 射门射线/推进线路用)。"""
+    dx, dy = bx - ax, by - ay
+    seg2 = dx * dx + dy * dy
+    if seg2 <= 1e-9:
+        return math.hypot(px - ax, py - ay)
+    t = ((px - ax) * dx + (py - ay) * dy) / seg2
+    t = max(0.0, min(1.0, t))
+    cx, cy = ax + t * dx, ay + t * dy
+    return math.hypot(px - cx, py - cy)
+
+
 class Player:
     """单个球员的 handle。可以在这里加入新的技术动作。
     """
@@ -374,8 +390,7 @@ class Player:
             )
 
         # v4.0a(playbook §P0 + Lead m04364): 前场触球「推进 >=2.2m 或射门」。
-        # 帧级差距:对方三区触球 avg travel 0.75m/死触 80%/触后射门 3.2%,
-        # top 2.14m/36%/16%。触发:ball.x>0 且球速<1.0(静态/半静态球)。
+        # v5.0 Step1(Lever A, v5-spec §2): 按距离分区 Z3 贴线 / Z1 终结 / Z2 推进 / Z2b 远距低平。
         ctx_now = ctx.now if ctx is not None else 0.0
         prev_fb = getattr(self, "_front_ball_prev", None)
         self._front_ball_prev = (ball.x, ball.y, ctx_now)
@@ -387,47 +402,109 @@ class Player:
         if ball.x > FRONT_THIRD_BALL_X and (
             ball_speed is None or ball_speed < FRONT_PUSH_MAX_BALL_SPEED_MPS
         ):
-            touchline_ball = abs(ball.y) >= half_w - FRONT_SHOOT_LATERAL_MARGIN_M
-            if dist_goal <= FRONT_SHOOT_RANGE_M and not touchline_ball:
-                their_keeper: Pose2D | None = None
-                keeper_dist = math.inf
-                for op in opp_poses:
-                    kd = math.hypot(op.x - goal_x, op.y - goal_y)
-                    if kd < keeper_dist:
-                        keeper_dist, their_keeper = kd, op
-                aim_abs = max(0.5, ctx.field.goal_width / 2.0 - FRONT_SHOT_INSET_M)
-                if their_keeper is not None and their_keeper.y > 0.0:
-                    aim_y = -aim_abs
-                elif their_keeper is not None and their_keeper.y < 0.0:
-                    aim_y = aim_abs
-                else:
-                    aim_y = aim_abs if ball.y <= 0.0 else -aim_abs
-                self.action = "attack:front_shoot"
-                return (
-                    angle_to(ball.x, ball.y, goal_x - 0.15, aim_y),
-                    FRONT_SHOT_POWER,
+            # v5.0 A-3.1: 前场踢球任务 1.5s 未执行(球位移<0.3m) → 释放踢球任务,
+            # 交给 attack 的 3s 看门狗,并冷却 1s 避免每帧重复同一脚。
+            front_plan = getattr(self, "_front_plan", None)
+            if (
+                front_plan is not None
+                and ctx_now - front_plan[0] > FRONT_KICK_STALL_S
+                and math.hypot(ball.x - front_plan[1], ball.y - front_plan[2])
+                < FRONT_KICK_STALL_M
+            ):
+                self._front_plan = None
+                self._front_shot_until = ctx_now + FRONT_SHOT_COOLDOWN_S
+                self.release_kick()
+                return None
+
+            their_keeper: Pose2D | None = None
+            keeper_dist = math.inf
+            for op in opp_poses:
+                kd = math.hypot(op.x - goal_x, op.y - goal_y)
+                if kd < keeper_dist:
+                    keeper_dist, their_keeper = kd, op
+
+            # Z3 贴线/贴底: 不射门,沿长轴推 1.5m(power 5.0),球留在场内滚动。
+            if (
+                abs(ball.y) > half_w - FRONT_SHOOT_LATERAL_MARGIN_M
+                or ball.x > half_l - FRONT_Z3_BALL_X_MARGIN_M
+            ):
+                sign_x = 1.0 if ball.x < 0.0 else -1.0
+                tx = clamp(
+                    ball.x + sign_x * FRONT_Z3_PUSH_M,
+                    -(half_l - 0.3), half_l - 0.3,
                 )
-            # 距门 >9.2m:向对方门方向推进 2.2m,横向避开最近对手 1.2m。
-            push_x = ball.x + FRONT_PUSH_MIN_M
-            push_y = ball.y
-            if touchline_ball:
-                # v4.1:贴线球沿长轴轻推,不横移不浪射。
-                push_y = clamp(ball.y, -half_w + 0.4, half_w - 0.4)
-            elif nearest_opp is not None:
-                straight_d = abs(nearest_opp.y - ball.y)
-                if straight_d < FRONT_PUSH_OPP_CLEAR_M:
-                    push_y = ball.y + (
-                        FRONT_PUSH_OPP_CLEAR_M
-                        if nearest_opp.y >= ball.y
-                        else -FRONT_PUSH_OPP_CLEAR_M
-                    )
-            push_x = min(push_x, half_l - 1.2)
-            push_y = clamp(push_y, -half_w + 1.0, half_w - 1.0)
-            self.action = "attack:front_push"
-            return (
-                angle_to(ball.x, ball.y, push_x, push_y),
-                FRONT_PUSH_POWER,
+                ty = clamp(ball.y, -(half_w - 0.4), half_w - 0.4)
+                self.action = "attack:front_touchline_push"
+                self._front_plan = (ctx_now, ball.x, ball.y)
+                return angle_to(ball.x, ball.y, tx, ty), FRONT_Z3_POWER
+
+            aim_abs = max(0.5, ctx.field.goal_width / 2.0 - FRONT_SHOT_INSET_M)
+            if their_keeper is not None and abs(their_keeper.y) > 0.15:
+                aim_y = -aim_abs if their_keeper.y > 0.0 else aim_abs
+            else:
+                aim_y = -aim_abs if ball.y >= 0.0 else aim_abs
+            # Z1 终结: 距门 <=6.5 且射线 1.2m 内无对手(封堵则改推进)。
+            shot_ready = (
+                dist_goal <= FRONT_SHOOT_RANGE_M
+                and ctx_now >= getattr(self, "_front_shot_until", 0.0)
             )
+            if shot_ready:
+                blocked = False
+                for op in opp_poses:
+                    if (
+                        _dist_point_to_segment(
+                            op.x, op.y, ball.x, ball.y, goal_x - 0.15, aim_y,
+                        )
+                        < FRONT_BLOCK_LINE_CLEAR_M
+                    ):
+                        blocked = True
+                        break
+                if not blocked:
+                    self.action = "attack:front_shoot"
+                    self._front_shot_until = ctx_now + FRONT_SHOT_COOLDOWN_S
+                    self._front_plan = (ctx_now, ball.x, ball.y)
+                    return (
+                        angle_to(ball.x, ball.y, goal_x - 0.15, aim_y),
+                        FRONT_SHOT_POWER,
+                    )
+            # Z2 推进: 6.5<d<=12,向门 2.2m,横向避最近对手 1.2m;两侧被封朝中线斜推。
+            if dist_goal <= FRONT_Z2_MAX_DIST_M:
+                push_x = min(ball.x + FRONT_PUSH_MIN_M, half_l - 1.2)
+                push_y = ball.y
+                if nearest_opp is not None:
+                    straight_d = abs(nearest_opp.y - ball.y)
+                    if straight_d < FRONT_PUSH_OPP_CLEAR_M:
+                        side = 1.0 if nearest_opp.y >= ball.y else -1.0
+                        push_y = ball.y + side * FRONT_PUSH_OPP_CLEAR_M
+                        if abs(push_y) > half_w - 1.0:
+                            side_mid = 1.0 if ball.y <= 0.0 else -1.0
+                            push_y = ball.y + side_mid * FRONT_PUSH_OPP_CLEAR_M
+                push_x = clamp(push_x, -half_l + 1.0, half_l - 1.2)
+                push_y = clamp(push_y, -half_w + 1.0, half_w - 1.0)
+                self.action = "attack:front_push"
+                self._front_plan = (ctx_now, ball.x, ball.y)
+                return angle_to(ball.x, ball.y, push_x, push_y), FRONT_PUSH_POWER
+            # Z2b 距离过远(d>12): 朝对方半场边线低平 pass,线路无对手才传。
+            side_y = -1.0 if ball.y >= 0.0 else 1.0
+            tx = half_l - 3.0
+            ty = side_y * (half_w - 1.2)
+            lane_clear = True
+            for op in opp_poses:
+                if (
+                    _dist_point_to_segment(op.x, op.y, ball.x, ball.y, tx, ty)
+                    < FRONT_Z2B_LANE_CLEAR_M
+                ):
+                    lane_clear = False
+                    break
+            if lane_clear:
+                self.action = "attack:front_pass"
+                self._front_plan = (ctx_now, ball.x, ball.y)
+                return angle_to(ball.x, ball.y, tx, ty), FRONT_Z2B_POWER
+            push_x = clamp(ball.x + FRONT_PUSH_MIN_M, -half_l + 1.0, half_l - 1.2)
+            push_y = clamp(ball.y, -half_w + 1.0, half_w - 1.0)
+            self.action = "attack:front_push"
+            self._front_plan = (ctx_now, ball.x, ball.y)
+            return angle_to(ball.x, ball.y, push_x, push_y), FRONT_PUSH_POWER
 
         # 近门:射门。瞄向远离对方门将的一侧门内。
         if dist_goal <= SHOOT_RANGE_M:
