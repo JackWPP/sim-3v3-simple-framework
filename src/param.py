@@ -496,7 +496,10 @@ FRONT_SHOOT_LATERAL_MARGIN_M = 0.30
 # ---------------------------------------------------------------------------
 FRONT_BLOCK_LINE_CLEAR_M = 0.9    # v5.0-iter(ITERATE 预案①):Z1 射门封堵线 1.2→0.9,少放弃射门
 FRONT_SHOT_COOLDOWN_S = 0.6       # v5.0-iter(ITERATE 预案②):射门冷却 1.0→0.6,提高二次射门机会
-FRONT_Z3_BALL_X_MARGIN_M = 0.60   # ball.x > half_l-0.60 视为贴底
+FRONT_Z1_FAR_SHOT_M = 4.5         # v5.0-iter2(①):仅 d_goal>4.5m 时才因封线否决射门
+FRONT_BLOCKER_NEAR_BALL_M = 0.6   # v5.0-iter2(①):最近阻挡者距球<0.6m 时否决(贴身才放弃)
+FRONT_Z3_TOUCHLINE_MARGIN_M = 0.15  # v5.0-iter2(②):贴线推收窄为 |ball.y|>half_w-0.15
+FRONT_Z3_BALL_X_MARGIN_M = 1.00   # v5.0-iter2(②):且 ball.x>half_l-1.00 才走贴线推
 FRONT_Z3_PUSH_M = 1.5             # Z3 沿长轴推距离
 FRONT_Z3_POWER = 5.0              # Z3 沿长轴推力度(不射门)
 FRONT_KICK_STALL_S = 1.5          # 前场踢球任务 1.5s 未执行视为卡住

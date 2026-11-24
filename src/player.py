@@ -427,9 +427,11 @@ class Player:
                     keeper_dist, their_keeper = kd, op
 
             # Z3 贴线/贴底: 不射门,沿长轴推 1.5m(power 5.0),球留在场内滚动。
+            # v5.0-iter2(②):收窄为「真贴边(y>half_w-0.15) 且 贴底线(x>half_l-1.0)」,
+            # 其余情况回到 Z1/Z2 判定(放宽前 4.2/6.4 门限吃掉过多射门机会)。
             if (
-                abs(ball.y) > half_w - FRONT_SHOOT_LATERAL_MARGIN_M
-                or ball.x > half_l - FRONT_Z3_BALL_X_MARGIN_M
+                abs(ball.y) > half_w - FRONT_Z3_TOUCHLINE_MARGIN_M
+                and ball.x > half_l - FRONT_Z3_BALL_X_MARGIN_M
             ):
                 sign_x = 1.0 if ball.x < 0.0 else -1.0
                 tx = clamp(
@@ -446,13 +448,16 @@ class Player:
                 aim_y = -aim_abs if their_keeper.y > 0.0 else aim_abs
             else:
                 aim_y = -aim_abs if ball.y >= 0.0 else aim_abs
-            # Z1 终结: 距门 <=6.5 且射线 1.2m 内无对手(封堵则改推进)。
+            # Z1 终结: 距门 <=6.5;封线否决仅在两条件下生效(v5.0-iter2①):
+            # d_goal>4.5m(远射被挡风险高) 或 最近阻挡者距球<0.6m(贴身无法起脚);
+            # 其余即便射线内有对手也照常射,减少「能射不射」的空转。
             shot_ready = (
                 dist_goal <= FRONT_SHOOT_RANGE_M
                 and ctx_now >= getattr(self, "_front_shot_until", 0.0)
             )
             if shot_ready:
                 blocked = False
+                nearest_blocker_ball = math.inf
                 for op in opp_poses:
                     if (
                         _dist_point_to_segment(
@@ -461,8 +466,15 @@ class Player:
                         < FRONT_BLOCK_LINE_CLEAR_M
                     ):
                         blocked = True
-                        break
-                if not blocked:
+                        nearest_blocker_ball = min(
+                            nearest_blocker_ball,
+                            math.hypot(op.x - ball.x, op.y - ball.y),
+                        )
+                veto_shot = blocked and (
+                    dist_goal > FRONT_Z1_FAR_SHOT_M
+                    or nearest_blocker_ball < FRONT_BLOCKER_NEAR_BALL_M
+                )
+                if not veto_shot:
                     self.action = "attack:front_shoot"
                     self._front_shot_until = ctx_now + FRONT_SHOT_COOLDOWN_S
                     self._front_plan = (ctx_now, ball.x, ball.y)
