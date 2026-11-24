@@ -470,41 +470,22 @@ class Player:
                         angle_to(ball.x, ball.y, goal_x - 0.15, aim_y),
                         FRONT_SHOT_POWER,
                     )
-            # Z2 推进: 6.5<d<=12,向门 2.2m,横向避最近对手 1.2m;两侧被封朝中线斜推。
-            if dist_goal <= FRONT_Z2_MAX_DIST_M:
-                push_x = min(ball.x + FRONT_PUSH_MIN_M, half_l - 1.2)
-                push_y = ball.y
-                if nearest_opp is not None:
-                    straight_d = abs(nearest_opp.y - ball.y)
-                    if straight_d < FRONT_PUSH_OPP_CLEAR_M:
-                        side = 1.0 if nearest_opp.y >= ball.y else -1.0
-                        push_y = ball.y + side * FRONT_PUSH_OPP_CLEAR_M
-                        if abs(push_y) > half_w - 1.0:
-                            side_mid = 1.0 if ball.y <= 0.0 else -1.0
-                            push_y = ball.y + side_mid * FRONT_PUSH_OPP_CLEAR_M
-                push_x = clamp(push_x, -half_l + 1.0, half_l - 1.2)
-                push_y = clamp(push_y, -half_w + 1.0, half_w - 1.0)
-                self.action = "attack:front_push"
-                self._front_plan = (ctx_now, ball.x, ball.y)
-                return angle_to(ball.x, ball.y, push_x, push_y), FRONT_PUSH_POWER
-            # Z2b 距离过远(d>12): 朝对方半场边线低平 pass,线路无对手才传。
-            side_y = -1.0 if ball.y >= 0.0 else 1.0
-            tx = half_l - 3.0
-            ty = side_y * (half_w - 1.2)
-            lane_clear = True
-            for op in opp_poses:
-                if (
-                    _dist_point_to_segment(op.x, op.y, ball.x, ball.y, tx, ty)
-                    < FRONT_Z2B_LANE_CLEAR_M
-                ):
-                    lane_clear = False
-                    break
-            if lane_clear:
-                self.action = "attack:front_pass"
-                self._front_plan = (ctx_now, ball.x, ball.y)
-                return angle_to(ball.x, ball.y, tx, ty), FRONT_Z2B_POWER
-            push_x = clamp(ball.x + FRONT_PUSH_MIN_M, -half_l + 1.0, half_l - 1.2)
-            push_y = clamp(ball.y, -half_w + 1.0, half_w - 1.0)
+            # Z2 推进(前场,6.5<d):向门 2.2m,横向避最近对手 1.2m;两侧被封朝中线斜推。
+            # v5.0-cleanup(A-2):原 Z2 上限 12m 恒真(前场距门最大≈8.32m),
+            # 其后 Z2b 分支不可达,已删除该分支及 FRONT_Z2_MAX_DIST_M/
+            # FRONT_Z2B_POWER/FRONT_Z2B_LANE_CLEAR_M 三个未消费参数。
+            push_x = min(ball.x + FRONT_PUSH_MIN_M, half_l - 1.2)
+            push_y = ball.y
+            if nearest_opp is not None:
+                straight_d = abs(nearest_opp.y - ball.y)
+                if straight_d < FRONT_PUSH_OPP_CLEAR_M:
+                    side = 1.0 if nearest_opp.y >= ball.y else -1.0
+                    push_y = ball.y + side * FRONT_PUSH_OPP_CLEAR_M
+                    if abs(push_y) > half_w - 1.0:
+                        side_mid = 1.0 if ball.y <= 0.0 else -1.0
+                        push_y = ball.y + side_mid * FRONT_PUSH_OPP_CLEAR_M
+            push_x = clamp(push_x, -half_l + 1.0, half_l - 1.2)
+            push_y = clamp(push_y, -half_w + 1.0, half_w - 1.0)
             self.action = "attack:front_push"
             self._front_plan = (ctx_now, ball.x, ball.y)
             return angle_to(ball.x, ball.y, push_x, push_y), FRONT_PUSH_POWER
@@ -1190,6 +1171,7 @@ class Player:
                 else:
                     self.kick(angle_to(ball.x, ball.y, 0.0, 0.0), KICK_POWER_LINE_CLEAR)
                 return
+            self.action = "attack:kick"  # 通用兜底标签,机制分支会覆盖
             coord_plan = self._coordinated_kick_plan()
             if coord_plan is None:
                 self.stop()
@@ -1198,8 +1180,11 @@ class Player:
             # v5.0 Step3b(C-2):夺回球权 1s 内第一脚力度下限 5.5(禁慢速倒脚)。
             if self.recover_boost:
                 kick_power = max(kick_power, RECOVER_FIRST_TOUCH_POWER)
-            # v2.8:回退 v2.7 的对齐门控(kick 反复起停导致进攻瘫痪),恢复直接 kick。
-            self.action = "attack:kick"
+            # v5.0-cleanup(A-1,Lead m05728):先设通用标签,再让
+            # _coordinated_kick_plan 的机制分支覆盖(attack:front_shoot/
+            # front_push/front_touchline_push/cross/cross_near_post/
+            # own_third_clear/clear/shoot/progress),供 A/B 归因。
+            # 纯可观测性改动:action 字段只用于回放/调试,不参与决策。
             self.kick(kick_direction, kick_power)
         else:
             self.release_kick()
