@@ -303,11 +303,14 @@ v3.0 = restore v2.16(535766a) + 2 patches（#22 越界分量夹取 + 门口容�
 ### 14.1 候选产物（已保护，build/candidates/）
 | 版本 | 本地候选包 | sha256 | 大小 | 说明 |
 |---|---|---|---|---|
-| **v5.0 final（三机制 + 评审修复，A/B 实验组）** | `build/candidates/v5.0-final-2cc3e3b5.agent` | `2cc3e3b5…` | 866431B | v5 分支 `dc9890d` + step3b 评审修复 |
+| **v5.0 final2（A/B 唯一候选，三机制 + 评审修复 + cleanup）** | `build/candidates/v5.0-final2-172da34d.agent` | `172da34d…` | 866437B | v5 分支 `8448016`（cleanup：机制标签可观测 + 删 Z2b 死代码；行为中性已复核）；analyst 5 分钟只读复核后启用 |
+| v5.0 final（旧 A/B 候选，已被 final2 取代） | `build/candidates/v5.0-final-2cc3e3b5.agent` | `2cc3e3b5…` | 866431B | v5 分支 `dc9890d` + step3b 评审修复 |
 | v5.0 Step3（评审前旧包，备用） | `build/candidates/v5.0-final-2cc3e3b5.agent` | `6ef34e5e…` | 865946B | v5 分支 `dc9890d` 构建 |
 | v4.5b（线上默认 / 控制组） | `build/candidates/v4.5b-6fb30100.agent` | `6fb30100…` | 861653B | main `ef64d23` 重新构建；与线上提交包 `e7dcc0d6…` **同源码同字节大小**，sha 不同仅因 .agent 打包含时间戳/签名，非源码差异 |
 
 > 注意：`.agent` 构建不可复现，不要用 sha 判断线上版本；以 size + 源码 commit 为准。提交前 `python3 -m py_compile src/...` 不需要，直接提交对应候选包。
+>
+> v5.0-cleanup（commit `8448016`）只做行为中性两项：①机制动作标签不再被 `attack:kick` 覆盖（纯可观测性）；②删除 Z2b 不可达分支与 3 个未消费参数。复核：命令流逐帧一致（82d9be08 7364 帧 0 差异）、replay 30/30 PASS 0 异常、10 场 198,582 个 player-frame 中机制标签可见（front_push/front_shoot/front_touchline_push/cross/cross_near_post/press:first/press:block/press:clear/box2_post/box2_rebound/box2_reset）。
 
 ### 14.2 配对设计（同对手/同段位，控制漂移）
 - Pair1：对手 **0707**（player_id `19b7f706-c6e2-48ac-9e19-0e5310ad0bf1`，约 1055）
@@ -326,7 +329,7 @@ cd /home/xgx/wpp1/sim-3v3-simple-framework
 cd /tmp && node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' 2>/dev/null | tr -d '"' > /tmp/.champ_token; cd -
 # 1) 提交对应版本为默认代码
 python3 tools/online_submit.py build/candidates/v4.5b-6fb30100.agent --display-name com.example.lqinternalmatch-v4.5b-ab
-python3 tools/online_submit.py build/candidates/v5.0-final-2cc3e3b5.agent --display-name com.example.lqinternalmatch-v5.0
+python3 tools/online_submit.py build/candidates/v5.0-final2-172da34d.agent --display-name com.example.lqinternalmatch-v5.0
 # 2) 向指定对手发起挑战（tools/online_challenge.py player <player_uuid>），拿 match_uuid
 python3 tools/online_challenge.py player 19b7f706-c6e2-48ac-9e19-0e5310ad0bf1   # 0707
 python3 tools/online_challenge.py player 433ab70b-e502-4fbb-88d7-b72cfcd93921   # 张原硕
