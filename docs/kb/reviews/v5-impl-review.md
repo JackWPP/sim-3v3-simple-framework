@@ -99,3 +99,30 @@ NICE-TO-HAVE（A/B 后清理）：Z2b 死代码、`press_until`/`box2_since` 冗
 
 ---
 评审人：replay-analyst（只读审查，未改 src/）。依据：`git show 717972a/6a04039/dc9890d`、`docs/kb/reviews/v5-spec.md`、v5 分支 `src/main.py`、`src/player.py`、`src/param.py`。
+
+---
+
+## 追加复核：`8448016` v5.0-cleanup（A/B 候选 `v5.0-final2` 准入，2026-11-24 21:0x）
+
+复核对象：`8448016 v5.0-cleanup`（`src/player.py` +22/−40、`src/param.py` −3）与 `f8b2813`（docs-only：`docs/kb/online-loop.md` §14 候选切到 final2）。方式：只读代码 + 独立离线复演，未改 src。
+
+### A-1 机制标签不被 `attack:kick` 覆盖（可观测性）
+- 实现：`attack()` 在调用 `_coordinated_kick_plan()` **之前**设兜底 `self.action="attack:kick"`；机制分支（`front_shoot/front_push/front_touchline_push/cross/cross_near_post/own_third_clear/clear/shoot/progress`）返回计划前设置的标签不再被覆盖；`coord_plan is None`（卡住释放）时保留兜底标签，仅影响显示。
+- 证据：全仓 `grep` 中 `action` 的读取仅 `src/main.py:1819` 调试标签拼接（`f"{p.id}:{p.action}"`），无任何决策分支读取 `p.action` → **纯可观测性，PASS**。
+- A/B 归因收益：线上/离线统计不再把全部机制动作收敛为 `attack:kick`；影子统计已可见 `front_push 1454 / front_shoot 78 / front_touchline_push 308 / cross 74 / cross_near_post 740 / press:* / box2_*` 标签。
+
+### A-2 删除 Z2b 不可达分支及 3 个参数（行为中性）
+- 原条件 `if dist_goal <= FRONT_Z2_MAX_DIST_M(12.0)` 恒真：前场入口要求 `ball.x > FRONT_THIRD_BALL_X(0.0)`，故 `dx < 7`；实测两场 0707 归档（2839/4169 个前场帧）`max dist_goal = 8.237 / 8.293`，`d>12` 帧 **0**；其后 Z2b（`d>12` 的低平 pass）不可达。
+- 删除后保留的 Z2 推进逻辑与旧 Z2 分支逐行等价（`push_x=min(ball.x+2.2, half_l−1.2)`、最近对手横向避让 1.2 m、两侧被封朝中线、双侧 clamp），非旧 Z2b 回退式简化——因 `d>12` 不可达，**可达状态行为不变，PASS**。
+- `FRONT_Z2_MAX_DIST_M/FRONT_Z2B_POWER/FRONT_Z2B_LANE_CLEAR_M` 全仓（src+tools+docs 代码）无引用，删除安全。
+
+### A-3 `press_until` 语义未动
+- `git diff 15090f0 8448016 -- src/` 仅 `player.py/param.py`；`press_until` 仍只 init（`src/main.py:143`）+ `_update_touch_events` 写入（`src/main.py:580`），无读取；反抢窗口判定仍用 `loss_t`（`PRESS_DURATION_S`）。**PASS**。
+
+### 独立行为验证（我方复跑）
+- `python3 /tmp/shadow_eval2.py 15090f0|8448016 <out> <uuid1> <uuid2>` 对 0707 两场归档：`abb37886`（6847 帧）与 `82d9be08`（7364 帧）。
+- 结果：`frames/move_cmds/kick_cmds/plan_calls/plan_buckets` **两版完全一致**（82d9be08：move 20392、kick 1700、plan 513、buckets shoot_9 74 / push_7 199 / pass_6 8 / z3_5 42）；纪律风险代理 `r06_risk_frames/r07_risk_frames/m05_runs_10s/stuck_runs_2s` 一致；唯一差异是应当变化的 `shot_action_frames`（0→100 / 4→150，标签可观测性生效）。与 T1 的 7364 帧 move/kick 0 差异、shadow4 一致、30/30 replay 0 异常结论互相印证。
+
+### 候选包与准入
+- `build/candidates/v5.0-final2-172da34d.agent`：866,437 B，`sha256 172da34d7c82…18338`，与 T1 声明一致；`/tmp/playcheck_v5final2.json` 30 条记录 `exceptions=[]`、`freeze_windows=[]`。
+- **结论：PASS（无 BLOCKING / 无新增 NOC）**，可用作 A/B 唯一候选（替代 `2cc3e3b5`）；A/B 代码基线仍 `705ab48`（= `15090f0` 代码树），4 场贯穿同一候选 sha。旧 3 条 SHOULD-FIX 回归核验项不变（box2 2 s 回退、press 场内门控、recover 首脚 ≥5.5）。

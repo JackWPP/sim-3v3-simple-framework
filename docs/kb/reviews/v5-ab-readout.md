@@ -130,6 +130,8 @@ v5 KEEP 后，下一轮优先级建议（供 Lead 选）：
 
 ## 8. 回滚与记录
 
+**A/B 候选包登记（开跑前）**：实验包 `build/candidates/v5.0-final2-172da34d.agent`（866,437 B，`sha256 172da34d7c82…18338`；cleanup `8448016` 行为中性，已复核 PASS）；控制包 `v4.5b-6fb30100.agent`；A/B 代码基线 `705ab48`（= `15090f0` 代码树）；4 场配对贯穿同一实验包 sha。机制归因优先用线上 action 计数（cleanup 后机制标签可见），并用离线 `shadow_eval2.py` 双版 diff 交叉核对。
+
 - 回滚候选：`v4.5b` main `ef64d23`（候选 sha 以 `build/candidates/` 记录为准）。
 - A/B 场次在 `records.md` 标记 `[A/B]`，不参与 rating 趋势拟合（rating 波动本身也记录）。
 - 结果与判定必须同时写：原始指标表、逐球归因、机制触发证据（离线 diff）、最终 KEEP/ITERATE/ROLLBACK 及依据条目。
