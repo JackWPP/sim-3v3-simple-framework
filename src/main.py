@@ -621,9 +621,12 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
             and ball.x < 0.0
             and (ball_vel[0] * (gx_e - ball.x) + ball_vel[1] * (gy_e - ball.y)) > 0.0
         )
+        # v4.2(#58 罚单根因):v4.1 加过 ball.x>=-2.0 门控,导致深位(角旗区)出界球
+        # 不撤位 —— 我方球员停在对手 throwIn 摆球点 0.3m 内,摆球后 7s 内被球堵死,
+        # 触碰 → R-06、踢球瞬间 0.34m → R-07(#58 两张罚单)。撤位只应由「球朝己门
+        # 滚」门控,深位出界球更需要撤(角旗是死地,进去就出不来)。
         going_out = (
             not incoming
-            and ball.x >= -2.0
             and (
                 (ball.y > half_w_e - margin_e and ball_vel[1] > min_v)
                 or (ball.y < -(half_w_e - margin_e) and ball_vel[1] < -min_v)
@@ -637,8 +640,13 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
                 key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
             )
     if out_retreater is not None:
-        gx_o, gy_o = own_goal(context)
-        ux_o, uy_o = gx_o - ball.x, gy_o - ball.y
+        # v4.2(#58):深位(x<-2)出界球撤向「场心方向」而不是己门 —— 角旗区朝己门
+        # 撤会贴边线走、路径擦球;朝场心 2.4m 能一次离开死地。
+        if ball.x < -2.0:
+            ux_o, uy_o = 0.0 - ball.x, 0.0 - ball.y
+        else:
+            gx_o, gy_o = own_goal(context)
+            ux_o, uy_o = gx_o - ball.x, gy_o - ball.y
         un_o = math.hypot(ux_o, uy_o)
         if un_o > 1e-6:
             ux_o, uy_o = ux_o / un_o, uy_o / un_o
@@ -739,11 +747,20 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         # 旧逻辑 d 在 0.39-0.52 抖动时每 ~0.5s 交替 approach/clear,
         # omni_move_toward 反复取消 kick 任务 → 球 9s+ 未动、global_game_stuck。
         clear_until = getattr(store, "slowball_clear_until", 0.0)
-        in_clear = d_sb <= SLOW_BALL_CLEAR_CONTACT_M or (
-            context.now < clear_until and d_sb <= SLOW_BALL_CLEAR_RELEASE_M
+        # v4.2(#59):贴线球 approach 目标被场边 clamp,机器人能到的真实距离比
+        # 0.45 门限大(0.463)→ 永远进不了 clear 卡死;贴线球放宽到 0.62。
+        _half_w_sb = context.field.width / 2.0
+        contact_m = (
+            SLOW_BALL_TOUCHLINE_CLEAR_M
+            if abs(ball.y) > _half_w_sb - SLOW_BALL_TOUCHLINE_MARGIN_M
+            else SLOW_BALL_CLEAR_CONTACT_M
+        )
+        release_m = max(contact_m, SLOW_BALL_CLEAR_RELEASE_M)
+        in_clear = d_sb <= contact_m or (
+            context.now < clear_until and d_sb <= release_m
         )
         if in_clear:
-            if d_sb <= SLOW_BALL_CLEAR_CONTACT_M:
+            if d_sb <= contact_m:
                 store.slowball_clear_until = context.now + SLOW_BALL_CLEAR_HOLD_S
             attacker.action = "slowball:clear"
             attacker.kick(
@@ -815,6 +832,31 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         if attacker.pose is not None:
             primary_pose = (attacker.pose.x, attacker.pose.y)
         rest = [p for p in field_players if p is not attacker]
+
+    # v4.2(P2, playbook §P2 + Lead m04364): 禁区第二人。attacker 在对方禁区
+    # 前沿时,第二人前插到 ball+2.5m(向门)+横向 1.2m 抢二点/补射。playbook
+    # 对比:top 队禁区 touch 4-10,我们 0-5;v4.1 3 场 box touch 0/0/5。
+    if attacker is not None and rest and ball.x > context.field.length / 2.0 - BOX_SECOND_BALL_X_OFFSET:
+        box2 = min(
+            rest, key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y),
+        )
+        gx2, gy2 = opponent_goal(context)
+        ux2, uy2 = gx2 - ball.x, gy2 - ball.y
+        un2 = math.hypot(ux2, uy2)
+        if un2 > 1e-6:
+            ux2, uy2 = ux2 / un2, uy2 / un2
+        else:
+            ux2, uy2 = 1.0, 0.0
+        side2 = 1.0 if ball.y >= 0.0 else -1.0
+        bx2 = ball.x + BOX_SECOND_AHEAD_M * ux2 - BOX_SECOND_LATERAL_M * uy2 * side2
+        by2 = ball.y + BOX_SECOND_AHEAD_M * uy2 + BOX_SECOND_LATERAL_M * ux2 * side2
+        half_l2 = context.field.length / 2.0
+        half_w2 = context.field.width / 2.0
+        bx2 = clamp(bx2, 0.5, half_l2 - 0.6)
+        by2 = clamp(by2, -(half_w2 - 0.8), half_w2 - 0.8)
+        box2.action = "support:box2"
+        box2.move_to_position((bx2, by2))
+        rest = [q for q in rest if q is not box2]
 
     keeper.action = "guard"
     keeper.guard(ball_vel)
@@ -1095,7 +1137,9 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             context,
             ball.x - math.cos(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
             ball.y - math.sin(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
-            0.3,  # v2.15:绕行目标留 0.3m 场内余量(analyst 提醒)
+            # v4.2(#58):taker 绕位点必须 clamp 在场内 ≥0.4m —— 第 58 场 taker 站到
+            # 线外把球顶出 → 改判同点摆球 → R-06。
+            0.4,
         )
         # v3.1(P1, analyst):贴线球主罚从场内一侧绕(avoid_ball=True),避免机身
         # 斜穿把球顶出线(第 33 场 R-06 起点)。贴线=球距任一边线<0.7m。
@@ -1225,9 +1269,21 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
                 # 到无法再远离时,沿切向小步(0.4m)挪位。禁止长弦直线冲刺。
                 ux = (p.pose.x - ball.x) / max(d_ball, 1e-6)
                 uy = (p.pose.y - ball.y) / max(d_ball, 1e-6)
-                ex = p.pose.x + ux * 0.5
-                ey = p.pose.y + uy * 0.5
-                ex, ey = _field_point(context, ex, ey, 0.3)
+                # v4.2(#58):角部(double-corner)径向被两边线同时 clamp,纯径向
+                # 只能挪 0.12m → 停在摆球点 0.3m 内被判 R-06/R-07。角部改朝
+                # 「场心方向」斜撤 0.6m,一步离开死地。
+                if abs(ball.x) > half_length - 2.0 and abs(ball.y) > (
+                    context.field.width / 2.0 - 2.0
+                ):
+                    cx, cy = 0.0 - ball.x, 0.0 - ball.y
+                    cn = math.hypot(cx, cy) or 1.0
+                    ex = p.pose.x + cx / cn * 0.6
+                    ey = p.pose.y + cy / cn * 0.6
+                    ex, ey = _field_point(context, ex, ey, 0.3)
+                else:
+                    ex = p.pose.x + ux * 0.5
+                    ey = p.pose.y + uy * 0.5
+                    ex, ey = _field_point(context, ex, ey, 0.3)
                 if dist(ex, ey, ball.x, ball.y) <= d_ball + 0.02:
                     ex = p.pose.x - uy * 0.4
                     ey = p.pose.y + ux * 0.4

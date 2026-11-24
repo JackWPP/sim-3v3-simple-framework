@@ -1168,7 +1168,8 @@ class Player:
             home[0], home[1], rgb=(0.0, 0.6, 1.0), scale=0.2, ns="guard_home",
         )
         # v4.1:横移用 omni(不先转身),门将转身慢会吃掉 1-2s;仅原位微调用 walk_to。
-        if abs(self.pose.y - home[1]) > 0.15 or abs(self.pose.x - home[0]) > 0.6:
+        # v4.2(A3):横移响应只有 49%,omni 触发阈值 0.15→0.08,预测差大时立即横移。
+        if abs(self.pose.y - home[1]) > 0.08 or abs(self.pose.x - home[0]) > 0.6:
             self.action = "guard:omni_home"
             self.omni_move_toward(home, speed=KEEPER_TRACK_SPEED_MPS)
         else:

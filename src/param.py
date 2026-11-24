@@ -437,6 +437,9 @@ SET_PLAY_TAKER_RETREAT_M = 1.4       # 第一脚后 taker 向场内撤离距离
 SET_PLAY_TAKER_RETREAT_SPEED_MPS = 1.2
 SET_PLAY_FIRST_TOUCH_M = 0.4         # 球离开摆球点超过该值视为第一脚已完成
 SLOW_BALL_CLEAR_RELEASE_M = 0.60     # 滞回:进入 clear 后 d 超过该值才回 approach
+# v4.2(#59 死锁):贴线球 approach 目标被 clamp 到场内,机器人到点后真实距离
+# 0.46>0.45 门限 → 静止 19.5s 吃 M-05。贴线球放宽 clear 门限到 0.62。
+SLOW_BALL_TOUCHLINE_CLEAR_M = 0.62
 SLOW_BALL_CLEAR_HOLD_S = 0.8         # 滞回保持时间(s)
 SLOW_BALL_TOUCHLINE_MARGIN_M = 1.0   # 慢球贴线判定
 SLOW_BALL_TOUCHLINE_PUSH_M = 1.8     # 贴线慢球沿长轴解围距离
@@ -449,7 +452,7 @@ WATCHDOG_TOUCHLINE_PUSH_M = 1.5      # 看门狗贴线特判沿长轴推距
 # ---------------------------------------------------------------------------
 FRONT_THIRD_BALL_X = 0.0           # ball.x > 该值视为前场
 FRONT_PUSH_MAX_BALL_SPEED_MPS = 1.0  # 球速 < 该值视为静态/半静态球
-FRONT_SHOOT_RANGE_M = 9.2          # 前场静态球射程(原 SHOOT_RANGE_M 6.5)
+FRONT_SHOOT_RANGE_M = 6.5          # 前场静态球射程(原 SHOOT_RANGE_M 6.5)
 FRONT_SHOT_POWER = 9.0             # 前场射门力度(<= KICK_POWER_MAX 10)
 FRONT_SHOT_INSET_M = 0.45          # 瞄门柱内侧距离
 FRONT_PUSH_MIN_M = 2.2             # 推进最小推进距离(球向对方门方向)
@@ -462,8 +465,16 @@ KEEPER_PRED_MIN_SPEED_MPS = 0.30   # 球朝己门滚动速度门限
 KEEPER_PRED_MAX_T_S = 4.0          # 光行时超过 4s 不追(球太远)
 KEEPER_PRED_MARGIN_M = 0.25        # 门柱内缩(预测点 y clamp ±(1.3-0.25)=±1.05)
 KEEPER_TRACK_SPEED_MPS = 1.60      # 门将横移速度(omni,不先转身)
-KEEPER_TRACK_DEADBAND_M = 0.10     # 目标变化死区,防抖
+KEEPER_TRACK_DEADBAND_M = 0.06     # v4.2(A3 响应 49%):死区 0.10→0.06
 
 # v4.1(analyst #52 复盘):前场开火横向门控。贴线球(|ball.y| 靠边)不浪射,
 # 改沿长轴轻推;证据 #52 10 射 0 正、贴线球空转 25s。
 FRONT_SHOOT_LATERAL_MARGIN_M = 0.30
+
+
+# v4.2(P2, playbook §P2): 禁区第二人。attacker 在对方禁区前沿(ball.x >
+# half_l - 2.5)时,非门将第二人前插到 ball+2.5m(向门)+横向 1.2m 抢二点/
+# 补射,而不是留在中场。playbook:top 队禁区 touch 4-10,我们 0-5。
+BOX_SECOND_BALL_X_OFFSET = 2.5
+BOX_SECOND_AHEAD_M = 2.5
+BOX_SECOND_LATERAL_M = 1.2
