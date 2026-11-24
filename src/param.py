@@ -418,7 +418,7 @@ GOAL_MOUTH_ROBOT_MAX_X = 7.12
 # ---------------------------------------------------------------------------
 BALL_OUT_PREDICT_MARGIN_M = 0.35
 BALL_OUT_PREDICT_MIN_SPEED_MPS = 0.2
-BALL_OUT_RETREAT_M = 2.8
+BALL_OUT_RETREAT_M = 2.4  # v4.1(analyst spec §四):撤位目标 ball+2.4*unit(己门)
 BALL_OUT_RETREAT_SPEED_MPS = 1.5
 
 # ---------------------------------------------------------------------------
@@ -455,3 +455,15 @@ FRONT_SHOT_INSET_M = 0.45          # 瞄门柱内侧距离
 FRONT_PUSH_MIN_M = 2.2             # 推进最小推进距离(球向对方门方向)
 FRONT_PUSH_POWER = 7.0             # 推进踢力度
 FRONT_PUSH_OPP_CLEAR_M = 1.2       # 推进目标横向避开最近对手的距离
+
+# v4.1(analyst docs/kb/reviews/keeper-predict-spec.md + Lead m04611):门将按球速
+# 预测球到门线的 y 封堵(跨版本 6 个慢球失球都是门将只跟当前 ball.y、dy 1.0-2.1)。
+KEEPER_PRED_MIN_SPEED_MPS = 0.30   # 球朝己门滚动速度门限
+KEEPER_PRED_MAX_T_S = 4.0          # 光行时超过 4s 不追(球太远)
+KEEPER_PRED_MARGIN_M = 0.25        # 门柱内缩(预测点 y clamp ±(1.3-0.25)=±1.05)
+KEEPER_TRACK_SPEED_MPS = 1.60      # 门将横移速度(omni,不先转身)
+KEEPER_TRACK_DEADBAND_M = 0.10     # 目标变化死区,防抖
+
+# v4.1(analyst #52 复盘):前场开火横向门控。贴线球(|ball.y| 靠边)不浪射,
+# 改沿长轴轻推;证据 #52 10 射 0 正、贴线球空转 25s。
+FRONT_SHOOT_LATERAL_MARGIN_M = 0.30

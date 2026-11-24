@@ -347,7 +347,8 @@ class Player:
         if ball.x > FRONT_THIRD_BALL_X and (
             ball_speed is None or ball_speed < FRONT_PUSH_MAX_BALL_SPEED_MPS
         ):
-            if dist_goal <= FRONT_SHOOT_RANGE_M:
+            touchline_ball = abs(ball.y) >= half_w - FRONT_SHOOT_LATERAL_MARGIN_M
+            if dist_goal <= FRONT_SHOOT_RANGE_M and not touchline_ball:
                 their_keeper: Pose2D | None = None
                 keeper_dist = math.inf
                 for op in opp_poses:
@@ -369,7 +370,10 @@ class Player:
             # 距门 >9.2m:向对方门方向推进 2.2m,横向避开最近对手 1.2m。
             push_x = ball.x + FRONT_PUSH_MIN_M
             push_y = ball.y
-            if nearest_opp is not None:
+            if touchline_ball:
+                # v4.1:贴线球沿长轴轻推,不横移不浪射。
+                push_y = clamp(ball.y, -half_w + 0.4, half_w - 0.4)
+            elif nearest_opp is not None:
                 straight_d = abs(nearest_opp.y - ball.y)
                 if straight_d < FRONT_PUSH_OPP_CLEAR_M:
                     push_y = ball.y + (
@@ -1042,7 +1046,23 @@ class Player:
                 behind = (-(half_l - 0.5), behind[1])
             self.walk_to(behind)
 
-    def guard(self) -> None:
+    def _predict_cover_y(self, ball, ball_vel) -> float:
+        """v4.1:预测球到门线时的 y(封堵点),球速不足/不朝门时回退跟随当前 y。"""
+        ctx = self.context
+        y_lim = ctx.field.goal_width / 2.0 - KEEPER_PRED_MARGIN_M
+        follow = clamp(ball.y, -y_lim, y_lim)
+        if ball_vel is None:
+            return follow
+        vx, vy = ball_vel
+        if vx >= -KEEPER_PRED_MIN_SPEED_MPS:
+            return follow
+        half_l = ctx.field.length / 2.0
+        t_line = (ball.x + half_l) / (-vx)
+        if t_line <= 0.0 or t_line > KEEPER_PRED_MAX_T_S:
+            return follow
+        return clamp(ball.y + vy * t_line, -y_lim, y_lim)
+
+    def guard(self, ball_vel: tuple[float, float] | None = None) -> None:
         """守门:封角度站位 + 门前解围。
 
         线上 v2.1 首战暴露两个问题(0:1):
@@ -1086,16 +1106,24 @@ class Player:
         # 球在对方半场时保守跟随。球比 KEEPER_DEEP_BALL_X 更深时进一步贴线。
         if ball is not None:
             if ball.x < 0.0:
-                cover_gain = 1.0  # v2.5:按球 y 全量跟随
-                cover_lim = 1.15
-                # v2.7:站位 x 不许比 -(half_l-KEEPER_LINE_INSET_M) 更靠外。v2.4
-                # 第 4 球的 keeper 追球追到 x=-7.36(门线外)才让球从身侧滚进。
-                home = (-(half_l - KEEPER_LINE_INSET_M), home[1])
+                # v4.1(analyst keeper-predict-spec):按球速预测过线点封堵,
+                # 不再只跟当前 ball.y(6 个慢球失球都是 dy 1.0-2.1)。
+                cover_y = self._predict_cover_y(ball, ball_vel)
+                # v2.7:站位 x 不许比 -(half_l-KEEPER_LINE_INSET_M) 更靠外。
+                home = (-(half_l - KEEPER_LINE_INSET_M), cover_y)
             else:
                 cover_gain = KEEPER_TRACK_GAIN_FAR
                 cover_lim = KEEPER_TRACK_Y_LIMIT_FAR
-            cover_y = clamp(ball.y * cover_gain, -cover_lim, cover_lim)
-            home = (home[0], cover_y)
+                cover_y = clamp(ball.y * cover_gain, -cover_lim, cover_lim)
+                home = (home[0], cover_y)
+            # v4.1:横移死区,目标变化<0.10m 时沿用上帧,防原地抖动。
+            prev_cover = getattr(self, "_guard_cover_y", None)
+            if prev_cover is not None and abs(home[1] - prev_cover) < KEEPER_TRACK_DEADBAND_M:
+                home = (home[0], prev_cover)
+            self._guard_cover_y = home[1]
+            # v4.1:门将若被挤到门线外(x<-6.9),立刻回到场内 -6.0。
+            if self.pose.x < -(half_l - KEEPER_LINE_INSET_M) - 0.1:
+                home = (-(half_l - 1.0), home[1])
 
         # 待命朝向:朝球(便于快速反应);球不可见则朝对方门方向(默认 0)。
         face = 0.0
@@ -1139,7 +1167,12 @@ class Player:
         debugdraw.point(
             home[0], home[1], rgb=(0.0, 0.6, 1.0), scale=0.2, ns="guard_home",
         )
-        self.walk_to(home, face=face, avoid_ball=False, avoid_robots=True)
+        # v4.1:横移用 omni(不先转身),门将转身慢会吃掉 1-2s;仅原位微调用 walk_to。
+        if abs(self.pose.y - home[1]) > 0.15 or abs(self.pose.x - home[0]) > 0.6:
+            self.action = "guard:omni_home"
+            self.omni_move_toward(home, speed=KEEPER_TRACK_SPEED_MPS)
+        else:
+            self.walk_to(home, face=face, avoid_ball=False, avoid_robots=True)
 
     def support(self, primary_pose: tuple[float, float] | None = None) -> None:
         """协同支援(v2.0):按进攻/防守两种形态跑位,不再和持球人挤球。

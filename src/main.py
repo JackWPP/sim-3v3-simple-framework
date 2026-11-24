@@ -454,14 +454,23 @@ def _ball_velocity_mps(
     ball = context.ball
     if ball is None:
         return None
+    # v4.1(analyst spec):同帧缓存。play() 内多个调用点若重复差分,会互相覆盖
+    # ball_prev(dt≈0)导致后续调用返回 None(门将拿不到球速)。
+    cached_t = getattr(store, "ball_vel_t", None)
+    if cached_t is not None and cached_t == context.now:
+        return getattr(store, "ball_vel", None)
     prev = getattr(store, "ball_prev", None)
     store.ball_prev = (ball.x, ball.y, context.now)
-    if prev is None:
-        return None
-    dt = context.now - prev[2]
-    if dt <= 1e-3 or dt > 0.5:
-        return None
-    return (ball.x - prev[0]) / dt, (ball.y - prev[1]) / dt
+    vel = None
+    if prev is not None:
+        dt = context.now - prev[2]
+        dx, dy = ball.x - prev[0], ball.y - prev[1]
+        # 单帧位移 >2m 视为裁判传送/摆球,不参与速度估计。
+        if 1e-3 < dt <= 0.5 and math.hypot(dx, dy) <= 2.0:
+            vel = (dx / dt, dy / dt)
+    store.ball_vel = vel
+    store.ball_vel_t = context.now
+    return vel
 
 
 def _ball_speed_mps(context: Context, store) -> float | None:
@@ -603,11 +612,24 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         half_w_e = context.field.width / 2.0
         margin_e = BALL_OUT_PREDICT_MARGIN_M
         min_v = BALL_OUT_PREDICT_MIN_SPEED_MPS
+        # v4.1(Lead m04611 + analyst spec §四):方向门控。球朝我方门滚时不能把
+        # 防守者从门前撤走(#52 769s、#53 442s 两次失球即此);球在 x<-2 深处
+        # 交给解围/门将处理,也不触发撤位。
+        gx_e, gy_e = own_goal(context)
+        incoming = (
+            ball_vel is not None
+            and ball.x < 0.0
+            and (ball_vel[0] * (gx_e - ball.x) + ball_vel[1] * (gy_e - ball.y)) > 0.0
+        )
         going_out = (
-            (ball.y > half_w_e - margin_e and ball_vel[1] > min_v)
-            or (ball.y < -(half_w_e - margin_e) and ball_vel[1] < -min_v)
-            or (ball.x > half_l_e - margin_e and ball_vel[0] > min_v)
-            or (ball.x < -(half_l_e - margin_e) and ball_vel[0] < -min_v)
+            not incoming
+            and ball.x >= -2.0
+            and (
+                (ball.y > half_w_e - margin_e and ball_vel[1] > min_v)
+                or (ball.y < -(half_w_e - margin_e) and ball_vel[1] < -min_v)
+                or (ball.x > half_l_e - margin_e and ball_vel[0] > min_v)
+                or (ball.x < -(half_l_e - margin_e) and ball_vel[0] < -min_v)
+            )
         )
         if going_out:
             out_retreater = min(
@@ -622,14 +644,18 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
             ux_o, uy_o = ux_o / un_o, uy_o / un_o
         else:
             ux_o, uy_o = -1.0, 0.0
+        out_retreater.release_kick()
+        # v4.1:目标 = ball + 2.4*unit(己门方向);x 不许越过 -(half_l-1.2),
+        # 若反而比球更靠后则改横向撤(y±2.4),避免把防守者塞回门线。
+        tx_o = ball.x + BALL_OUT_RETREAT_M * ux_o
+        ty_o = ball.y + BALL_OUT_RETREAT_M * uy_o
+        tx_o = max(tx_o, -(half_l_e - 1.2))
+        if tx_o < ball.x + 0.5 and ball.x < 0.0:
+            side_o = 1.0 if ball.y >= 0.0 else -1.0
+            tx_o, ty_o = ball.x, ball.y + side_o * BALL_OUT_RETREAT_M
         out_retreater.action = "normal:out_retreat"
         out_retreater.omni_move_toward(
-            _field_point(
-                context,
-                ball.x + BALL_OUT_RETREAT_M * ux_o,
-                ball.y + BALL_OUT_RETREAT_M * uy_o,
-                0.4,
-            ),
+            _field_point(context, tx_o, ty_o, 0.4),
             speed=BALL_OUT_RETREAT_SPEED_MPS,
         )
         field_players = [q for q in field_players if q is not out_retreater]
@@ -791,7 +817,7 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         rest = [p for p in field_players if p is not attacker]
 
     keeper.action = "guard"
-    keeper.guard()
+    keeper.guard(ball_vel)
 
     # v2.16(Lead m02385):失球后 3s 内 support 保持中场防守线(x≥-2.0),
     # 不随球退进禁区;primary 照常追球,门将照常守门,避免连续失球。
@@ -854,7 +880,7 @@ def _act_our_kickoff(context: Context, players: list[Player], store) -> None:
     if rest:
         gx, gy = own_goal(context)
         guard = min(rest, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
-        guard.guard()
+        guard.guard(_ball_velocity_mps(context, store))
         rest = [p for p in rest if p is not guard]
 
     # 非主罚球员必须在本方半场且中圈外。旧版直接 stop() 原地不动,若球权转换前
@@ -943,7 +969,7 @@ def _act_opp_kickoff(
                 keeper = prev_keeper
     store.normal_keeper = keeper.id
     keeper.action = "opp_kickoff:keeper"
-    keeper.guard()
+    keeper.guard(_ball_velocity_mps(context, store))
     rest = [p for p in players if p is not keeper]
 
     ball = context.ball
@@ -1095,7 +1121,7 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
         gx, gy = own_goal(context)
         keeper = min(rest, key=lambda p: dist(p.pose.x, p.pose.y, gx, gy))
         keeper.action = "setplay:guard"
-        keeper.guard()
+        keeper.guard(_ball_velocity_mps(context, store))
         rest = [p for p in rest if p is not keeper]
 
     half_length = context.field.length / 2.0
@@ -1164,7 +1190,7 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
             )
     else:
         keeper.action = "opp_setplay:keeper"
-        keeper.guard()
+        keeper.guard(_ball_velocity_mps(context, store))
 
     laterals = (-1.2, 1.2)
     for i, p in enumerate(rest):
