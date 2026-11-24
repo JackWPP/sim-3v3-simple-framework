@@ -7,6 +7,8 @@
 
 **方式**：只读代码 + 与 `docs/kb/reviews/v5-spec.md` 对照；未改 src/。门禁 30/30 PASS 只证明「无异常/无冻结」，不证明 M-05/纪律行为合理。
 
+> **状态更新（2026-11-24 20:10，评审后）**：T1 已在 `705ab48`（v5-step3b，候选 sha `2cc3e3b5`）修复本评审的 3 条 SHOULD-FIX——box2 预置分支加入 2 s+`BOX2_REST_R` 回退（`src/main.py:1057-1077`）、`press_window` 加入场内门控（`src/main.py:785-786`）、`recover_boost` 让夺回 1 s 内第一脚 `max(power, 5.5)`（`src/player.py:1199`）。因此 A/B 基线应为 **`705ab48`**，本文下列 «SHOULD-FIX» 条目转为 A/B 回归核验清单（并非待办）；另见 `v5-shadow-eval.md`（影子评估：无阻塞、射门量 −60% 为先验风险）与 `v5-ab-readout.md`（A/B 判读口径）。
+
 ## 结论先行（给 T1 一行用）
 
 **无 BLOCKING 项；有 3 条 SHOULD-FIX（约 40 行，建议 A/B 前修完再跑）**——否则可能污染 A/B 的 M-05 纪律红线与 C-2 机制兑现：
