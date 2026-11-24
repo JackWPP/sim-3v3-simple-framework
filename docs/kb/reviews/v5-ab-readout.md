@@ -16,9 +16,12 @@
 ## 2. 有效场判定（violation 记录，不计入胜负/产出对比，但机制指标保留）
 
 1. sha/帧完整性通过（manifest + segments 齐全，`replay_playcheck` 0 异常）。
-2. 对手**有效参赛**：away 触球 ≥10 且其机器人静态帧占比 <60%；若对手 park/掉线（如 #45/#51/#63b9f73e）→ 标记 `invalid:opponent_park`。
-3. 无平台级冻结：单场 >20 s 球未重启/无我方或对方指令（如 48 s「摆球后无人触球」兜底）出现 ≥2 次 → `invalid:freeze`。
-4. 我方无早期事故：开场 60 s 内 inactiveRobot/fallenRobot/乌龙 ≥2 次 → 标记但不剔除（属纪律证据，归入门禁）。
+2. 对手**有效参赛**：away 三台「全静止帧占比」≤85%，且（away ball_touch 事件 ≥5 或 away≥2 台在界外帧占比 ≤50%）；若对手 park/掉线（如 #45 b7ed0d18、#63b9f73e、yzy_7877 的两台 AFK）→ `invalid:opponent_park`。实测脚本 `/tmp/ra/ab_valid.py` 已用 #45/#63b9f73e（INVALID）与 abb37886（VALID）自检。
+3. 无**平台级冻结**：事件序列中相邻事件间隔 >20 s、且前一事件 `game.setPlay == NONE && stopped == False`（活球期裁判/引擎卡住，如 #50 的 19 s 球出界不重启）出现 ≥2 次 → `invalid:platform_freeze`。
+4. **重启停滞（不是 invalid，记录并两侧对比）**：set-play start → 下一次 `ball_free` >20 s（由裁判 secondary 45 s 兜底自动放开；本基线里张原硕 0:0 两场各 9 段/405 s，属双方都不触球的 gameplay 停滞，48 s「摆球后无人触球」这一类不计平台冻结）。统计 `stall20_episodes/stall20_seconds`；若单臂停滞秒数 ≥另一臂 2× 或 ≥200 s，最终结论标 `context_bias` 并用「非停滞时间」口径复核 G2/G3。
+5. 我方无早期事故：开场 60 s 内 inactiveRobot/fallenRobot/乌龙 ≥2 次 → **标记但不剔除**（属纪律证据，归入门禁）。
+
+**口径修订说明（A/B 开跑前，2026-11-24）**：原 §2 把「48 s 摆球后无人触球」也算平台冻结并会判 invalid；实测 v4.5b 张原硕 0:0 基线（两场各 9 段/405 s）会被整场判无效、导致配对臂不可用。现区分「平台/裁判卡住」（invalid）与「重启没人触球停滞」（记录+对比），否则 A/B 无法判读；此为开跑前校准，双方同口径。
 
 ## 3. 指标与数据来源
 
