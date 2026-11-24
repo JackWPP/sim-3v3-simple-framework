@@ -494,8 +494,8 @@ FRONT_SHOOT_LATERAL_MARGIN_M = 0.30
 # 触后 travel 0.75→≥1.20m、touch-to-shot 3.2%→≥8%、射正/场 ≥3。
 # 只新增参数,不动 v4.x 同名参数,便于 A/B 对照。
 # ---------------------------------------------------------------------------
-FRONT_BLOCK_LINE_CLEAR_M = 1.2    # Z1 射门射线被最近对手封堵的判定距离
-FRONT_SHOT_COOLDOWN_S = 1.0       # 射门后冷却(期间改推进,避免连射/空射)
+FRONT_BLOCK_LINE_CLEAR_M = 0.9    # v5.0-iter(ITERATE 预案①):Z1 射门封堵线 1.2→0.9,少放弃射门
+FRONT_SHOT_COOLDOWN_S = 0.6       # v5.0-iter(ITERATE 预案②):射门冷却 1.0→0.6,提高二次射门机会
 FRONT_Z3_BALL_X_MARGIN_M = 0.60   # ball.x > half_l-0.60 视为贴底
 FRONT_Z3_PUSH_M = 1.5             # Z3 沿长轴推距离
 FRONT_Z3_POWER = 5.0              # Z3 沿长轴推力度(不射门)
