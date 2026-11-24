@@ -128,6 +128,9 @@ class Player:
         # 踢球迟滞状态(跨帧)
         self._kicking: bool = False
 
+        # v5.0 Step3b(C-2):夺回球权后 1s 内第一脚力度下限标记,由 main 每帧写入。
+        self.recover_boost: bool = False
+
         # block/guard 的跨帧迟滞状态
         self._block_pressing: bool = False
         self._guard_threatened: bool = False
@@ -1192,6 +1195,9 @@ class Player:
                 self.stop()
                 return
             kick_direction, kick_power = coord_plan
+            # v5.0 Step3b(C-2):夺回球权 1s 内第一脚力度下限 5.5(禁慢速倒脚)。
+            if self.recover_boost:
+                kick_power = max(kick_power, RECOVER_FIRST_TOUCH_POWER)
             # v2.8:回退 v2.7 的对齐门控(kick 反复起停导致进攻瘫痪),恢复直接 kick。
             self.action = "attack:kick"
             self.kick(kick_direction, kick_power)

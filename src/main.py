@@ -766,6 +766,11 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
     if speed is not None and speed >= BOX2_FAST_BALL_MPS:
         store.fast_ball_until = context.now + BOX2_FAST_BALL_WINDOW_S
 
+    # v5.0 Step3b(review §3):夺回后 1s 内第一脚力度下限(C-2),由 attack() 读取。
+    recover_boost = context.now < getattr(store, "recover_until", 0.0)
+    for _p in field_players:
+        _p.recover_boost = recover_boost
+
     # v5.0 Step2(Lever C, v5-spec §4):丢球即反抢。丢球事件在 play() 里检测
     # (球速跃升 + last_touch_side 从 home 变 away);2.5s 窗口内、球不在对方
     # 三区时指派 P1(最近)/P2(次近)/P3(球在己方半场时第三人):P1 omni 直冲、
@@ -777,6 +782,8 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
         and loss_t is not None
         and context.now - loss_t <= PRESS_DURATION_S
         and ball.x <= PRESS_MAX_LOSS_BALL_X
+        and abs(ball.x) <= context.field.length / 2.0
+        and abs(ball.y) <= context.field.width / 2.0
         and game is not None
         and game.state == GameState.PLAYING
         and not game.stopped
@@ -1047,34 +1054,54 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
             if box2.pose is not None
             else 99.0
         )
-        if (
-            box_zone
-            and (speed is None or speed < 1.0 or fast_recent)
-            and box2_d <= BOX2_CRASH_R
-        ):
-            if box2_d <= BOX2_CONTACT_M:
-                box2.action = "support:box2_finish"
-                box2.one_touch_finish()
-            else:
-                box2.action = "support:box2_rebound"
-                box2.omni_move_toward(
-                    _field_point(context, ball.x, ball.y, 0.4),
-                    speed=BOX2_SPEED,
-                )
+        box2_since = getattr(store, "box2_since", None)
+        same_box2 = getattr(store, "box2_id", None) == box2.id
+        box2_stale = (
+            same_box2
+            and box2_since is not None
+            and context.now - box2_since > 2.0
+            and box2_d > BOX2_REST_R
+            and (speed is None or speed < 1.0)
+        )
+        if box2_stale:
+            # v5.0 step3b(review §M-05):预置 2s 未触球、球慢且距球
+            # >BOX2_REST_R → 回 rest 位,防禁区角久站吃 inactiveRobot。
+            box2.action = "support:box2_reset"
+            box2.move_to_position(
+                (BOX2_RESET_X, clamp(ball.y * 0.5, -2.0, 2.0)),
+            )
+            store.box2_id = None
+            store.box2_since = None
+            rest = [q for q in rest if q is not box2]
         else:
-            side_b = -1.0 if ball.y >= 0.0 else 1.0
-            tx_b = half_l_b - BOX2_SPOT_X_FROM_GOAL
-            ty_b = clamp(
-                side_b * BOX2_SPOT_Y, -(half_w_b - 0.8), half_w_b - 0.8,
-            )
-            box2.action = "support:box2_post"
-            box2.omni_move_toward(
-                _field_point(context, tx_b, ty_b, 0.4), speed=BOX2_SPEED,
-            )
-        store.box2_id = box2.id
-        if getattr(store, "box2_since", None) is None:
-            store.box2_since = context.now
-        rest = [q for q in rest if q is not box2]
+            if (
+                box_zone
+                and (speed is None or speed < 1.0 or fast_recent)
+                and box2_d <= BOX2_CRASH_R
+            ):
+                if box2_d <= BOX2_CONTACT_M:
+                    box2.action = "support:box2_finish"
+                    box2.one_touch_finish()
+                else:
+                    box2.action = "support:box2_rebound"
+                    box2.omni_move_toward(
+                        _field_point(context, ball.x, ball.y, 0.4),
+                        speed=BOX2_SPEED,
+                    )
+            else:
+                side_b = -1.0 if ball.y >= 0.0 else 1.0
+                tx_b = half_l_b - BOX2_SPOT_X_FROM_GOAL
+                ty_b = clamp(
+                    side_b * BOX2_SPOT_Y, -(half_w_b - 0.8), half_w_b - 0.8,
+                )
+                box2.action = "support:box2_post"
+                box2.omni_move_toward(
+                    _field_point(context, tx_b, ty_b, 0.4), speed=BOX2_SPEED,
+                )
+            store.box2_id = box2.id
+            if not same_box2:
+                store.box2_since = context.now
+            rest = [q for q in rest if q is not box2]
     else:
         prev_box2_id = getattr(store, "box2_id", None)
         if prev_box2_id is not None:

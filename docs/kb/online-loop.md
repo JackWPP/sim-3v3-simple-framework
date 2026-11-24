@@ -293,6 +293,9 @@ v3.0 = restore v2.16(535766a) + 2 patches（#22 越界分量夹取 + 门口容�
 - 回放复演确认 box2 分支生效：#94 0ab411d9 box2_post 204/rebound 24/reset 2 帧；#93 f679fe57 985/74/1；box2:finish 未触发（回放中 d≤0.55 时球权多在 attacker 处，属预期；A/B 实测验证）
 - Step1/2/3 合计：v5 分支 3 commits（717972a / 6a04039 / step3），三机制均门禁绿、离线候选包 3 个（46cee9a2 → 7adf3fe2 → 6ef34e5e）
 
+### 13.4 Step3b = analyst 评审 3 条 SHOULD-FIX（A/B 前）
+按 `docs/kb/reviews/v5-impl-review.md`（commit 7fa4a1d）修：① box2 预置分支加 2s 回退（`store.box2_since` 超 2s 且 `box2_d > BOX2_REST_R` 且球慢 → `support:box2_reset` 回 `(BOX2_RESET_X, clamp(ball.y*0.5,±2))` 并清状态，防 M-05）；② `press_window` 加球在场内约束（`abs(ball.x)<=half_l and abs(ball.y)<=half_w`，防球出界未 whistle 时把队友拉回摆球点）；③ 落地 `RECOVER_FIRST_TOUCH_POWER=5.5`（`main` 每帧写 `player.recover_boost`，`attack()` 中夺回窗口内 `max(power, 5.5)`）。py_compile/check_names/static_check 全绿；replay 最近 30 场 30/30 PASS、0 异常（/tmp/playcheck_v5final.json）；回放复演 box2_reset 已触发（#93 43 帧 / #74 15 帧），press 分支仍正常。离线候选包：`build/candidates/v5.0-final-2cc3e3b5.agent`，sha256 `2cc3e3b5262baa1b01fbbd8b85023e3d701252d0be508787649ac1774272504b`、866431B。
+
 ---
 
 ## 14. v5.0 A/B 待跑（充值后执行，预算 40 credits）
@@ -300,7 +303,8 @@ v3.0 = restore v2.16(535766a) + 2 patches（#22 越界分量夹取 + 门口容�
 ### 14.1 候选产物（已保护，build/candidates/）
 | 版本 | 本地候选包 | sha256 | 大小 | 说明 |
 |---|---|---|---|---|
-| v5.0 Step3（三机制） | `build/candidates/v5.0-step3-6ef34e5e.agent` | `6ef34e5e…` | 865946B | v5 分支 `dc9890d` 构建 |
+| **v5.0 final（三机制 + 评审修复，A/B 实验组）** | `build/candidates/v5.0-final-2cc3e3b5.agent` | `2cc3e3b5…` | 866431B | v5 分支 `dc9890d` + step3b 评审修复 |
+| v5.0 Step3（评审前旧包，备用） | `build/candidates/v5.0-final-2cc3e3b5.agent` | `6ef34e5e…` | 865946B | v5 分支 `dc9890d` 构建 |
 | v4.5b（线上默认 / 控制组） | `build/candidates/v4.5b-6fb30100.agent` | `6fb30100…` | 861653B | main `ef64d23` 重新构建；与线上提交包 `e7dcc0d6…` **同源码同字节大小**，sha 不同仅因 .agent 打包含时间戳/签名，非源码差异 |
 
 > 注意：`.agent` 构建不可复现，不要用 sha 判断线上版本；以 size + 源码 commit 为准。提交前 `python3 -m py_compile src/...` 不需要，直接提交对应候选包。
@@ -322,7 +326,7 @@ cd /home/xgx/wpp1/sim-3v3-simple-framework
 cd /tmp && node /tmp/cdp.js eval 'localStorage.getItem("booster_auth_token")' 2>/dev/null | tr -d '"' > /tmp/.champ_token; cd -
 # 1) 提交对应版本为默认代码
 python3 tools/online_submit.py build/candidates/v4.5b-6fb30100.agent --display-name com.example.lqinternalmatch-v4.5b-ab
-python3 tools/online_submit.py build/candidates/v5.0-step3-6ef34e5e.agent --display-name com.example.lqinternalmatch-v5.0
+python3 tools/online_submit.py build/candidates/v5.0-final-2cc3e3b5.agent --display-name com.example.lqinternalmatch-v5.0
 # 2) 向指定对手发起挑战（tools/online_challenge.py player <player_uuid>），拿 match_uuid
 python3 tools/online_challenge.py player 19b7f706-c6e2-48ac-9e19-0e5310ad0bf1   # 0707
 python3 tools/online_challenge.py player 433ab70b-e502-4fbb-88d7-b72cfcd93921   # 张原硕
