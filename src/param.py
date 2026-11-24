@@ -187,7 +187,7 @@ SET_PLAY_RECEIVER_AHEAD_M = 3.5
 # 阶段内保留原主罚的额外宽容距离(m),避免贴边线球绕不过来/首触慢。
 # v2.14:1.0→0.5(analyst+Lead:第7场定位球首触中位 12.2s、25 条里 22 条 >3s,
 # 绕后 1.0m 太远;缩短接近点让主罚更快触球,配合 avoid_ball=False)。
-SET_PLAY_TAKER_APPROACH_M = 0.5
+SET_PLAY_TAKER_APPROACH_M = 0.55  # v4.3(P0-B):0.5→0.55,taker 不得贴身绕后(analyst v42 §4.5)
 SET_PLAY_TAKER_KEEP_MARGIN_M = 0.6
 # v2.6:二次触球定位球的短传力度按距离插值,不再固定 3.6;
 # 线上 20c6a6cb 第 1 球就是固定力度短传被罚下队友、落点朝己门滚 8.2m 乌龙。
@@ -420,6 +420,15 @@ BALL_OUT_PREDICT_MARGIN_M = 0.35
 BALL_OUT_PREDICT_MIN_SPEED_MPS = 0.2
 BALL_OUT_RETREAT_M = 2.4  # v4.1(analyst spec §四):撤位目标 ball+2.4*unit(己门)
 BALL_OUT_RETREAT_SPEED_MPS = 1.5
+# v4.3(P0-B, analyst v42-4matches §4.5):我方 last touch 出界被判对方重启后,
+# 非门将必须退出摆球点 1.2m(旧 out_retreat 只预判「球将出界」,慢推/已出界
+# 时漏判 → 同点摆球被摆进身体 R-06/R-07,#46/#58/2dd@726.9 同族)。
+RESTART_OUT_RETREAT_M = 1.2
+RESTART_OUT_RETREAT_SPEED_MPS = 1.2
+# v4.3(P0-A):line_clear 贴线球沿长轴推 1.5m(旧逻辑朝场心 (0,0),后侧点越线
+# → _safe_kick_direction 不可达 hover 20s,inactiveRobot@632.17)。
+LINE_CLEAR_TOUCHLINE_MARGIN_M = 0.30
+LINE_CLEAR_LONG_AXIS_M = 1.5
 
 # ---------------------------------------------------------------------------
 # v3.3d(analyst #46/#47 + Lead m04298): 重启自伤三处补丁
@@ -465,7 +474,7 @@ KEEPER_PRED_MIN_SPEED_MPS = 0.30   # 球朝己门滚动速度门限
 KEEPER_PRED_MAX_T_S = 4.0          # 光行时超过 4s 不追(球太远)
 KEEPER_PRED_MARGIN_M = 0.25        # 门柱内缩(预测点 y clamp ±(1.3-0.25)=±1.05)
 KEEPER_TRACK_SPEED_MPS = 1.60      # 门将横移速度(omni,不先转身)
-KEEPER_TRACK_DEADBAND_M = 0.06     # v4.2(A3 响应 49%):死区 0.10→0.06
+KEEPER_TRACK_DEADBAND_M = 0.04     # v4.3(A1):死区 0.06→0.04,横移响应 52% 偏低
 
 # v4.1(analyst #52 复盘):前场开火横向门控。贴线球(|ball.y| 靠边)不浪射,
 # 改沿长轴轻推;证据 #52 10 射 0 正、贴线球空转 25s。

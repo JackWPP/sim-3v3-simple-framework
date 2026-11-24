@@ -234,12 +234,18 @@ class Player:
                 cand = math.atan2(cy / n, cx / n)
                 if behind_inside(cand) and not (ball.x < 0.0 and math.cos(cand) < -0.2):
                     return cand
-        # 回退:旧 ±0.35rad 旋转搜索(保留己方半场不朝己门的保护)。
-        for k in range(1, 9):
+        # v4.3(P0-A):搜索扩到 ±π(旧 ±0.35rad×8 只覆盖 2.8rad、步长粗;贴线球
+        # 需要 ~0.61rad 时搜不到 → attack:line_clear 后侧点越线 hover 20s,
+        # inactiveRobot@632.17)。逐 0.2rad 扫全周,优先小偏转。
+        for k in range(1, 33):
             for sign in (1.0, -1.0):
-                cand = normalize_angle(direction + sign * 0.35 * k)
+                cand = normalize_angle(direction + sign * 0.2 * k)
                 if behind_inside(cand) and not (ball.x < 0.0 and math.cos(cand) < -0.2):
                     return cand
+        # 最后回退:沿长轴 ±x(贴线球沿边线/底线推,后侧点通常仍在场内)。
+        for cand in (0.0, math.pi):
+            if behind_inside(cand) and not (ball.x < 0.0 and math.cos(cand) < -0.2):
+                return cand
         return direction
 
     def kick(
@@ -1003,7 +1009,20 @@ class Player:
                 # v3.3b(Lead m04025 第 3 条):只处理场内贴线球;球已出界时不追不踢,
                 # 交给出界/摆球流程,避免追到场外把球顶出线送 R-06。
                 self.action = "attack:line_clear"
-                self.kick(angle_to(ball.x, ball.y, 0.0, 0.0), KICK_POWER_LINE_CLEAR)
+                # v4.3(P0-A, analyst v42 §4.5):贴边线球沿长轴推 1.5m —— 旧逻辑
+                # 朝场心 (0,0) 时后侧点越线,`_safe_kick_direction` 不可达 →
+                # attack:line_clear hover 20s 吃 inactiveRobot@632.17。长轴方向
+                # 取朝场内一侧(x<0 往 +x、x>0 往 −x),保持球在边线附近滚动。
+                if abs(ball.y) > half_w - LINE_CLEAR_TOUCHLINE_MARGIN_M:
+                    sign_x = 1.0 if ball.x < 0.0 else -1.0
+                    tx = clamp(
+                        ball.x + sign_x * LINE_CLEAR_LONG_AXIS_M,
+                        -(half_l - 0.3), half_l - 0.3,
+                    )
+                    ty = clamp(ball.y, -(half_w - 0.3), half_w - 0.3)
+                    self.kick(angle_to(ball.x, ball.y, tx, ty), KICK_POWER_LINE_CLEAR)
+                else:
+                    self.kick(angle_to(ball.x, ball.y, 0.0, 0.0), KICK_POWER_LINE_CLEAR)
                 return
             coord_plan = self._coordinated_kick_plan()
             if coord_plan is None:
@@ -1169,7 +1188,7 @@ class Player:
         )
         # v4.1:横移用 omni(不先转身),门将转身慢会吃掉 1-2s;仅原位微调用 walk_to。
         # v4.2(A3):横移响应只有 49%,omni 触发阈值 0.15→0.08,预测差大时立即横移。
-        if abs(self.pose.y - home[1]) > 0.08 or abs(self.pose.x - home[0]) > 0.6:
+        if abs(self.pose.y - home[1]) > 0.05 or abs(self.pose.x - home[0]) > 0.6:
             self.action = "guard:omni_home"
             self.omni_move_toward(home, speed=KEEPER_TRACK_SPEED_MPS)
         else:

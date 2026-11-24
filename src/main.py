@@ -667,6 +667,37 @@ def _act_normal(context: Context, players: list[Player], store) -> None:
             speed=BALL_OUT_RETREAT_SPEED_MPS,
         )
         field_players = [q for q in field_players if q is not out_retreater]
+    # v4.3(P0-B, analyst v42 §4.5):球已出界(含我方 last touch 被判对方重启)时,
+    # 非门将退到摆球点 1.2m 外。旧 out_retreat 只预判「将出界」且要求球速>0.2,
+    # 慢推/已出界会漏判 → 同点摆球时被摆进身体 R-06(#46/#58/2dd@726.9 同族)。
+    if (
+        field_players
+        and (abs(ball.x) > context.field.length / 2.0 + 0.1
+             or abs(ball.y) > context.field.width / 2.0 + 0.1)
+        and game_early is not None
+        and game_early.state == GameState.PLAYING
+        and not game_early.stopped
+    ):
+        for p in list(field_players):
+            d_b = dist(p.pose.x, p.pose.y, ball.x, ball.y)
+            if d_b >= RESTART_OUT_RETREAT_M:
+                continue
+            ux_b, uy_b = p.pose.x - ball.x, p.pose.y - ball.y
+            un_b = math.hypot(ux_b, uy_b)
+            if un_b < 1e-6:
+                ux_b, uy_b, un_b = -1.0, 0.0, 1.0
+            p.release_kick()
+            p.action = "normal:out_restart_retreat"
+            p.omni_move_toward(
+                _field_point(
+                    context,
+                    ball.x + ux_b / un_b * (RESTART_OUT_RETREAT_M + 0.3),
+                    ball.y + uy_b / un_b * (RESTART_OUT_RETREAT_M + 0.3),
+                    0.3,
+                ),
+                speed=RESTART_OUT_RETREAT_SPEED_MPS,
+            )
+            field_players = [q for q in field_players if q is not p]
     attacker: Player | None = None
     primary_pose: tuple[float, float] | None = None
     rest: list[Player] = []
@@ -1139,7 +1170,8 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             ball.y - math.sin(kick_dir) * SET_PLAY_TAKER_APPROACH_M,
             # v4.2(#58):taker 绕位点必须 clamp 在场内 ≥0.4m —— 第 58 场 taker 站到
             # 线外把球顶出 → 改判同点摆球 → R-06。
-            0.4,
+            # v4.3(P0-B):margin 0.4→0.45,taker 不贴身绕后(2dd R-06@726.9 中边线变体)。
+            0.45,
         )
         # v3.1(P1, analyst):贴线球主罚从场内一侧绕(avoid_ball=True),避免机身
         # 斜穿把球顶出线(第 33 场 R-06 起点)。贴线=球距任一边线<0.7m。
@@ -1149,9 +1181,10 @@ def _act_our_set_play(context: Context, players: list[Player], store) -> None:
             abs(ball.y) > half_w_p - 0.7 or abs(ball.x) > half_l_p - 0.7
         )
         if near_touchline:
+            # v4.3(P0-B):贴线 clamp 0.35→0.45,避免 taker 沿边线贴身把球顶出。
             approach = (
-                clamp(approach[0], -half_l_p + 0.35, half_l_p - 0.35),
-                clamp(approach[1], -half_w_p + 0.35, half_w_p - 0.35),
+                clamp(approach[0], -half_l_p + 0.45, half_l_p - 0.45),
+                clamp(approach[1], -half_w_p + 0.45, half_w_p - 0.45),
             )
             taker.walk_to(approach, face=kick_dir, avoid_ball=True)
         else:
