@@ -132,6 +132,9 @@ class SoccerSimAgent(SoccerAgentMixin, AgentBase):
         # 吃 inactiveRobot(第 4 场 7 张罚单的根因候选)。
         store.last_ball_pose = None
         store.data_loss_patrol = {}
+        # v4.4a:对方重启二点前压的状态(球静置计时/最后球位)。
+        store.opp_restart_ball = None
+        store.opp_restart_static_since = None
 
     @staticmethod
     def play(context: Context, players: list[Player], store) -> None:
@@ -1268,6 +1271,59 @@ def _act_opp_set_play(context: Context, players: list[Player], store) -> None:
     else:
         keeper.action = "opp_setplay:keeper"
         keeper.guard(_ball_velocity_mps(context, store))
+
+    # v4.4a(analyst v43-00 机制① + Lead m05048):对方重启「合法二点前压」。
+    # 对方重启占 66-73% 比赛时间(单次 throwIn 平均 48s 才触球),我方旧逻辑
+    # 在 3.1m 轨道等待 → kicker 触球后二点球全丢。现在:摆球静置 >3s 后,
+    # 最近两人分站球的两侧 1.6m(>R-07 1.45m + 0.15m 余量),沿半径 1.6m
+    # 小幅摆动(±0.2rad)避免 M-05;对方触球后 set_play 清空 → 立即回 NORMAL
+    # 抢二点。仅对 throwIn/goalKick/cornerKick 且对方主罚生效。
+    counter_ok = (
+        g.set_play in (SetPlay.THROW_IN, SetPlay.GOAL_KICK, SetPlay.CORNER_KICK)
+        and g.kicking_team != context.team_id
+    )
+    if counter_ok:
+        last_rs = getattr(store, "opp_restart_ball", None)
+        if last_rs is None or dist(ball.x, ball.y, last_rs[0], last_rs[1]) > 0.2:
+            store.opp_restart_ball = (ball.x, ball.y)
+            store.opp_restart_static_since = context.now
+        static_s = context.now - getattr(
+            store, "opp_restart_static_since", context.now
+        )
+        if static_s > OPP_RESTART_TRIGGER_S and rest:
+            gx_c, gy_c = own_goal(context)
+            counter_players = sorted(
+                rest, key=lambda q: dist(q.pose.x, q.pose.y, ball.x, ball.y)
+            )[:2]
+            for idx_c, p_c in enumerate(counter_players):
+                if idx_c == 0:
+                    ux_c, uy_c = gx_c - ball.x, gy_c - ball.y
+                else:
+                    ux_c, uy_c = 0.0 - ball.x, 0.0 - ball.y
+                un_c = math.hypot(ux_c, uy_c) or 1.0
+                ux_c, uy_c = ux_c / un_c, uy_c / un_c
+                swing = math.sin(context.now * 1.2 + idx_c * 1.7) * (
+                    OPP_RESTART_SWING_RAD
+                )
+                ca, sa = math.cos(swing), math.sin(swing)
+                rx_c = ux_c * ca - uy_c * sa
+                ry_c = ux_c * sa + uy_c * ca
+                tx_c = ball.x + rx_c * OPP_RESTART_WAIT_R_M
+                ty_c = ball.y + ry_c * OPP_RESTART_WAIT_R_M
+                tx_c, ty_c = _field_point(context, tx_c, ty_c, 0.3)
+                # 场边 clamp 后若离球 <1.55m,退回径向 1.7m 保证 R-07 余量。
+                if dist(tx_c, ty_c, ball.x, ball.y) < 1.55:
+                    tx_c, ty_c = _away_from_ball_point(
+                        context, ball, p_c.pose, OPP_RESTART_WAIT_R_M + 0.1
+                    )
+                p_c.action = "opp_setplay:counter"
+                p_c.omni_move_toward(
+                    (tx_c, ty_c), speed=OPP_RESTART_COUNTER_SPEED
+                )
+            rest = [q for q in rest if q not in counter_players]
+    else:
+        store.opp_restart_ball = None
+        store.opp_restart_static_since = None
 
     laterals = (-1.2, 1.2)
     for i, p in enumerate(rest):
